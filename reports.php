@@ -1,12 +1,18 @@
 <?php
-require __DIR__ . '/db.php';
+session_start();
 
-$accounts = ['KIDS', 'DAPA'];
-$account = $_GET['account'] ?? 'KIDS';
-if (!in_array($account, $accounts, true)) {
+if (empty($_SESSION['authenticated'])) {
     header('Location: index.php');
     exit;
 }
+
+require __DIR__ . '/db.php';
+
+const ACCOUNT_NAME = 'Oxford Book Management';
+const ACCOUNT_KEY = 'OXFORD';
+
+$account = ACCOUNT_KEY;
+$accountLabel = ACCOUNT_NAME;
 
 $errors = [];
 
@@ -100,7 +106,7 @@ function formatCurrency(float $amount): string
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?= htmlspecialchars($account) ?> hisobi — Hisobotlar</title>
+    <title><?= htmlspecialchars($accountLabel) ?> — Hisobotlar</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
@@ -109,10 +115,10 @@ function formatCurrency(float $amount): string
         <div class="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-4 py-4">
             <div>
                 <p class="text-sm uppercase tracking-wider text-slate-500">Hisob</p>
-                <h1 class="text-2xl font-bold text-slate-900"><?= htmlspecialchars($account) ?> — hisobotlar</h1>
+                <h1 class="text-2xl font-bold text-slate-900"><?= htmlspecialchars($accountLabel) ?> — hisobotlar</h1>
                 <p class="text-sm text-slate-600">Oylik tendensiyalar, toʼlov usullari va eng koʼp sotilgan kitoblarni kuzating.</p>
             </div>
-            <a href="konto.php?account=<?= urlencode($account) ?>" class="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800">&larr; Inventarga qaytish</a>
+            <a href="konto.php" class="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800">&larr; Inventarga qaytish</a>
         </div>
     </header>
 
@@ -135,7 +141,6 @@ function formatCurrency(float $amount): string
                 </div>
             </div>
             <form method="get" class="grid gap-4 md:grid-cols-[repeat(2,minmax(0,1fr))_auto_auto]">
-                <input type="hidden" name="account" value="<?= htmlspecialchars($account) ?>">
                 <div>
                     <label class="block text-sm font-medium text-slate-600">Boshlanish sanasi</label>
                     <input type="date" name="start_date" value="<?= htmlspecialchars($startDate->format('Y-m-d')) ?>" class="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400">
@@ -148,7 +153,7 @@ function formatCurrency(float $amount): string
                     <button type="submit" class="w-full rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-600">Hisobotni koʼrish</button>
                 </div>
                 <div class="flex items-end">
-                    <a href="reports.php?account=<?= urlencode($account) ?>" class="w-full rounded-xl border border-slate-300 px-4 py-2 text-center text-sm font-medium text-slate-700 transition hover:bg-slate-100">Tozalash</a>
+                    <a href="reports.php" class="w-full rounded-xl border border-slate-300 px-4 py-2 text-center text-sm font-medium text-slate-700 transition hover:bg-slate-100">Tozalash</a>
                 </div>
             </form>
 
