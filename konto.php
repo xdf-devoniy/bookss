@@ -88,24 +88,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 } elseif ((int) $book['quantity'] < $sellQuantity) {
                     $errors[] = 'Yetarli miqdor mavjud emas.';
                 } else {
-                    $totalCost = (float) $book['buy_price'] * $sellQuantity;
-                    $totalRevenue = (float) $book['sell_price'] * $sellQuantity;
-                    $profit = $totalRevenue - $totalCost;
+                    $paidInput = trim($_POST['paid_amount'] ?? '');
+                    $customRevenue = $paidInput === '' ? null : tofloat($paidInput);
+                    if ($customRevenue !== null && $customRevenue < 0) {
+                        $errors[] = 'Toʼlangan summa manfiy boʼlishi mumkin emas.';
+                    } else {
+                        $totalCost = (float) $book['buy_price'] * $sellQuantity;
+                        $totalRevenue = $customRevenue !== null
+                            ? (float) $customRevenue
+                            : (float) $book['sell_price'] * $sellQuantity;
+                        $profit = $totalRevenue - $totalCost;
 
-                    $pdo->beginTransaction();
-                    try {
-                        $insertSale = $pdo->prepare('INSERT INTO sales (account, book_id, quantity, total_cost, total_revenue, profit, payment_method, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
-                        $insertSale->execute([$account, $bookId, $sellQuantity, $totalCost, $totalRevenue, $profit, $paymentMethod, $note !== '' ? $note : null]);
+                        $pdo->beginTransaction();
+                        try {
+                            $insertSale = $pdo->prepare('INSERT INTO sales (account, book_id, quantity, total_cost, total_revenue, profit, payment_method, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+                            $insertSale->execute([
+                                $account,
+                                $bookId,
+                                $sellQuantity,
+                                $totalCost,
+                                $totalRevenue,
+                                $profit,
+                                $paymentMethod,
+                                $note !== '' ? $note : null,
+                            ]);
 
-                        $newQuantity = (int) $book['quantity'] - $sellQuantity;
-                        $updateBook = $pdo->prepare('UPDATE books SET quantity = ?, last_quantity_snapshot = ?, last_quantity_change = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND account = ?');
-                        $updateBook->execute([$newQuantity, (int) $book['quantity'], -$sellQuantity, $bookId, $account]);
+                            $newQuantity = (int) $book['quantity'] - $sellQuantity;
+                            $updateBook = $pdo->prepare('UPDATE books SET quantity = ?, last_quantity_snapshot = ?, last_quantity_change = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND account = ?');
+                            $updateBook->execute([$newQuantity, (int) $book['quantity'], -$sellQuantity, $bookId, $account]);
 
-                        $pdo->commit();
-                        $messages[] = 'Sotuv muvaffaqiyatli qayd etildi.';
-                    } catch (Exception $e) {
-                        $pdo->rollBack();
-                        $errors[] = 'Sotuvni saqlashda xatolik: ' . $e->getMessage();
+                            $pdo->commit();
+                            $messages[] = 'Sotuv muvaffaqiyatli qayd etildi.';
+                        } catch (Exception $e) {
+                            $pdo->rollBack();
+                            $errors[] = 'Sotuvni saqlashda xatolik: ' . $e->getMessage();
+                        }
                     }
                 }
             }
@@ -140,27 +157,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         if ($difference > 0 && $currentStock < $difference) {
                             $errors[] = 'Kitob omborida yetarli miqdor mavjud emas.';
                         } else {
-                            $unitCost = $oldQuantity > 0 ? ((float) $sale['total_cost'] / $oldQuantity) : (float) $book['buy_price'];
-                            $unitRevenue = $oldQuantity > 0 ? ((float) $sale['total_revenue'] / $oldQuantity) : (float) $book['sell_price'];
-                            $newTotalCost = $unitCost * $newQuantity;
-                            $newTotalRevenue = $unitRevenue * $newQuantity;
-                            $newProfit = $newTotalRevenue - $newTotalCost;
+                            $revenueInput = trim($_POST['sale_total_revenue'] ?? '');
+                            $customRevenue = $revenueInput === '' ? null : tofloat($revenueInput);
+                            if ($customRevenue !== null && $customRevenue < 0) {
+                                $errors[] = 'Tushum qiymati manfiy boʼlishi mumkin emas.';
+                            } else {
+                                $unitCost = $oldQuantity > 0 ? ((float) $sale['total_cost'] / $oldQuantity) : (float) $book['buy_price'];
+                                $unitRevenue = $oldQuantity > 0 ? ((float) $sale['total_revenue'] / $oldQuantity) : (float) $book['sell_price'];
+                                $newTotalCost = $unitCost * $newQuantity;
+                                $calculatedRevenue = $unitRevenue * $newQuantity;
+                                $newTotalRevenue = $customRevenue !== null ? (float) $customRevenue : $calculatedRevenue;
+                                $newProfit = $newTotalRevenue - $newTotalCost;
 
-                            $pdo->beginTransaction();
-                            try {
-                                $newBookQuantity = $currentStock - $difference;
-                                $inventoryChange = -$difference;
-                                $updateBook = $pdo->prepare('UPDATE books SET quantity = ?, last_quantity_snapshot = ?, last_quantity_change = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND account = ?');
-                                $updateBook->execute([$newBookQuantity, $currentStock, $inventoryChange, (int) $sale['book_id'], $account]);
+                                $pdo->beginTransaction();
+                                try {
+                                    $newBookQuantity = $currentStock - $difference;
+                                    $inventoryChange = -$difference;
+                                    $updateBook = $pdo->prepare('UPDATE books SET quantity = ?, last_quantity_snapshot = ?, last_quantity_change = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND account = ?');
+                                    $updateBook->execute([
+                                        $newBookQuantity,
+                                        $currentStock,
+                                        $inventoryChange,
+                                        (int) $sale['book_id'],
+                                        $account,
+                                    ]);
 
-                                $updateSale = $pdo->prepare('UPDATE sales SET quantity = ?, total_cost = ?, total_revenue = ?, profit = ?, payment_method = ?, note = ? WHERE id = ? AND account = ?');
-                                $updateSale->execute([$newQuantity, $newTotalCost, $newTotalRevenue, $newProfit, $paymentMethod, $note !== '' ? $note : null, $saleId, $account]);
+                                    $updateSale = $pdo->prepare('UPDATE sales SET quantity = ?, total_cost = ?, total_revenue = ?, profit = ?, payment_method = ?, note = ? WHERE id = ? AND account = ?');
+                                    $updateSale->execute([
+                                        $newQuantity,
+                                        $newTotalCost,
+                                        $newTotalRevenue,
+                                        $newProfit,
+                                        $paymentMethod,
+                                        $note !== '' ? $note : null,
+                                        $saleId,
+                                        $account,
+                                    ]);
 
-                                $pdo->commit();
-                                $messages[] = 'Sotuv maʼlumotlari yangilandi.';
-                            } catch (Exception $e) {
-                                $pdo->rollBack();
-                                $errors[] = 'Sotuvni yangilashda xatolik: ' . $e->getMessage();
+                                    $pdo->commit();
+                                    $messages[] = 'Sotuv maʼlumotlari yangilandi.';
+                                } catch (Exception $e) {
+                                    $pdo->rollBack();
+                                    $errors[] = 'Sotuvni yangilashda xatolik: ' . $e->getMessage();
+                                }
                             }
                         }
                     }
@@ -437,6 +476,7 @@ function formatCurrency(float $amount): string
                                         data-book-id="<?= (int) $book['id'] ?>"
                                         data-book-title="<?= htmlspecialchars($book['title'], ENT_QUOTES) ?>"
                                         data-book-quantity="<?= $quantity ?>"
+                                        data-book-sell-price="<?= htmlspecialchars((float) ($book['sell_price'] ?? 0), ENT_QUOTES) ?>"
                                         class="inline-flex items-center rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-200">Sotish</button>
                                     <button type="button" data-open-book-edit
                                         data-book-id="<?= (int) $book['id'] ?>"
@@ -544,6 +584,7 @@ function formatCurrency(float $amount): string
                                             data-sale-quantity="<?= (int) $sale['quantity'] ?>"
                                             data-sale-payment="<?= htmlspecialchars($sale['payment_method'] ?? 'cash', ENT_QUOTES) ?>"
                                             data-sale-note="<?= htmlspecialchars($sale['note'] ?? '', ENT_QUOTES) ?>"
+                                            data-sale-revenue="<?= htmlspecialchars((float) ($sale['total_revenue'] ?? 0), ENT_QUOTES) ?>"
                                             data-sale-stock="<?= (int) $sale['current_quantity'] ?>"
                                             class="inline-flex items-center rounded-full bg-sky-100 px-3 py-1 text-xs font-semibold text-sky-700 transition hover:bg-sky-200">Tahrirlash</button>
                                     <?php else: ?>
@@ -649,6 +690,11 @@ function formatCurrency(float $amount): string
                     </div>
                 </div>
                 <div>
+                    <label class="block text-sm font-medium text-slate-700">Jami tushgan summa</label>
+                    <input type="number" name="paid_amount" min="0" step="0.01" class="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400" placeholder="Masalan: 150000">
+                    <p class="mt-1 text-xs text-slate-500">Boʼsh qoldirilsa, sotuv narxi va miqdor asosida avtomatik hisoblanadi.</p>
+                </div>
+                <div>
                     <label class="block text-sm font-medium text-slate-700">Izoh (ixtiyoriy)</label>
                     <textarea name="note" rows="3" class="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400" placeholder="Masalan: Click orqali toʼlandi"></textarea>
                 </div>
@@ -687,6 +733,11 @@ function formatCurrency(float $amount): string
                             </label>
                         <?php endforeach; ?>
                     </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-700">Jami tushum</label>
+                    <input type="number" name="sale_total_revenue" min="0" step="0.01" class="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400" placeholder="Masalan: 200000">
+                    <p class="mt-1 text-xs text-slate-500">Agar boʼsh qoldirilsa, oldingi birlik narxi asosida qayta hisoblanadi.</p>
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-slate-700">Izoh</label>
@@ -787,14 +838,50 @@ function formatCurrency(float $amount): string
         const sellHelper = document.getElementById('sell-quantity-helper');
         const sellInfo = document.getElementById('sell-modal-info');
         const sellSubmit = document.getElementById('sell-submit');
+        const sellPaidInput = sellForm ? sellForm.querySelector('input[name="paid_amount"]') : null;
+        let sellPaidTouched = false;
+
+        function updateSellRevenueSuggestion() {
+            if (!sellForm || !sellPaidInput || sellPaidTouched) {
+                return;
+            }
+            const basePrice = parseFloat(sellForm.dataset.sellPrice || '0');
+            const qty = parseInt(sellForm.sell_quantity.value || '0', 10);
+            if (basePrice > 0 && qty > 0) {
+                sellPaidInput.value = (basePrice * qty).toFixed(2);
+            } else if (qty > 0) {
+                sellPaidInput.value = '';
+            } else {
+                sellPaidInput.value = '';
+            }
+        }
+
+        if (sellPaidInput) {
+            sellPaidInput.addEventListener('input', () => {
+                sellPaidTouched = sellPaidInput.value.trim() !== '';
+            });
+        }
+
+        if (sellForm && sellForm.sell_quantity) {
+            sellForm.sell_quantity.addEventListener('input', () => {
+                updateSellRevenueSuggestion();
+            });
+        }
+
         document.querySelectorAll('[data-open-sell]').forEach((button) => {
             button.addEventListener('click', () => {
                 const id = button.getAttribute('data-book-id');
                 const title = button.getAttribute('data-book-title') || '';
                 const quantity = parseInt(button.getAttribute('data-book-quantity') || '0', 10);
+                const sellPrice = parseFloat(button.getAttribute('data-book-sell-price') || '0');
+                sellPaidTouched = false;
                 sellForm.reset();
                 sellForm.book_id.value = id;
+                sellForm.dataset.sellPrice = Number.isFinite(sellPrice) ? sellPrice.toString() : '0';
                 sellForm.sell_quantity.disabled = quantity <= 0;
+                if (sellPaidInput) {
+                    sellPaidInput.disabled = quantity <= 0;
+                }
                 if (sellSubmit) {
                     sellSubmit.disabled = quantity <= 0;
                     sellSubmit.classList.toggle('opacity-50', quantity <= 0);
@@ -802,6 +889,7 @@ function formatCurrency(float $amount): string
                 }
                 sellForm.sell_quantity.max = Math.max(quantity, 0);
                 sellForm.sell_quantity.value = quantity > 0 ? 1 : '';
+                updateSellRevenueSuggestion();
                 sellHelper.textContent = quantity > 0 ? `Omborda: ${quantity} ta. Maksimal sotish miqdori ${quantity} ta.` : 'Omborda mavjud emas.';
                 sellInfo.textContent = `${title} — omborda ${quantity} ta.`;
                 openModal(sellModal);
@@ -810,6 +898,44 @@ function formatCurrency(float $amount): string
 
         const saleForm = document.getElementById('sale-form');
         const saleHelper = document.getElementById('sale-quantity-helper');
+        const saleRevenueInput = saleForm ? saleForm.querySelector('input[name="sale_total_revenue"]') : null;
+        let saleRevenueTouched = false;
+
+        function updateSaleRevenueSuggestion() {
+            if (!saleForm || !saleRevenueInput || saleRevenueTouched) {
+                return;
+            }
+            const unitRevenue = parseFloat(saleForm.dataset.unitRevenue || '0');
+            const qty = parseInt(saleForm.sale_quantity.value || '0', 10);
+            if (qty > 0 && !Number.isNaN(unitRevenue)) {
+                saleRevenueInput.value = (unitRevenue * qty).toFixed(2);
+            } else {
+                saleRevenueInput.value = '';
+            }
+        }
+
+        if (saleRevenueInput) {
+            saleRevenueInput.addEventListener('input', () => {
+                const raw = saleRevenueInput.value.trim();
+                saleRevenueTouched = raw !== '';
+                if (!saleForm) {
+                    return;
+                }
+                const qty = parseInt(saleForm.sale_quantity.value || '0', 10);
+                const normalized = raw.replace(/\s+/g, '').replace(',', '.');
+                const numeric = parseFloat(normalized);
+                if (qty > 0 && !Number.isNaN(numeric)) {
+                    saleForm.dataset.unitRevenue = (numeric / qty).toString();
+                }
+            });
+        }
+
+        if (saleForm && saleForm.sale_quantity) {
+            saleForm.sale_quantity.addEventListener('input', () => {
+                updateSaleRevenueSuggestion();
+            });
+        }
+
         document.querySelectorAll('[data-open-sale]').forEach((button) => {
             button.addEventListener('click', () => {
                 const id = button.getAttribute('data-sale-id');
@@ -817,7 +943,12 @@ function formatCurrency(float $amount): string
                 const stock = parseInt(button.getAttribute('data-sale-stock') || '0', 10);
                 const payment = button.getAttribute('data-sale-payment') || 'cash';
                 const note = button.getAttribute('data-sale-note') || '';
+                const revenue = parseFloat(button.getAttribute('data-sale-revenue') || '0');
+                saleRevenueTouched = false;
                 saleForm.reset();
+                saleForm.dataset.unitRevenue = quantity > 0 && !Number.isNaN(revenue)
+                    ? (revenue / quantity).toString()
+                    : '0';
                 saleForm.form_type.value = 'edit_sale';
                 saleForm.sale_id.value = id;
                 saleForm.sale_quantity.value = quantity;
@@ -827,7 +958,11 @@ function formatCurrency(float $amount): string
                 saleForm.querySelectorAll('input[name="sale_payment_method"]').forEach((radio) => {
                     radio.checked = radio.value === payment;
                 });
+                if (saleRevenueInput) {
+                    saleRevenueInput.value = !Number.isNaN(revenue) ? revenue.toFixed(2) : '';
+                }
                 saleForm.sale_note.value = note;
+                updateSaleRevenueSuggestion();
                 openModal(saleModal);
             });
         });
