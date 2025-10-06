@@ -181,7 +181,11 @@ function formatCurrency(float $amount): string
                         <h3 class="text-sm font-semibold text-slate-800">Oylik tushum va foyda</h3>
                         <span class="text-xs text-slate-500">Oxirgi <?= count($monthlyChartData['labels']) ?> oy</span>
                     </div>
-                    <canvas id="monthlyChart" class="mt-4 h-64"></canvas>
+                    <div class="mt-4">
+                        <div class="relative h-64">
+                            <canvas id="monthlyChart" class="absolute inset-0"></canvas>
+                        </div>
+                    </div>
                 </div>
                 <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                     <h3 class="text-sm font-semibold text-slate-800">Toʼlovlar taqsimoti</h3>
