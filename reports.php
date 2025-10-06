@@ -185,7 +185,9 @@ function formatCurrency(float $amount): string
                 </div>
                 <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                     <h3 class="text-sm font-semibold text-slate-800">Toʼlovlar taqsimoti</h3>
-                    <canvas id="paymentChart" class="mt-4 h-64"></canvas>
+                    <div class="mt-4 aspect-square">
+                        <canvas id="paymentChart" class="h-full w-full"></canvas>
+                    </div>
                     <ul class="mt-4 space-y-2 text-sm">
                         <?php foreach ($paymentLabels as $key => $label): ?>
                             <li class="flex items-center justify-between">
@@ -386,6 +388,7 @@ function formatCurrency(float $amount): string
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    aspectRatio: 1,
                     plugins: {
                         legend: {
                             position: 'bottom',
