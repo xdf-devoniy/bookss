@@ -13,9 +13,15 @@ $messages = [];
 
 function tofloat($value)
 {
-    $normalized = str_replace([' ', ','], ['', '.'], (string)$value);
-    return (float)$normalized;
+    $normalized = str_replace([' ', ','], ['', '.'], (string) $value);
+    return (float) $normalized;
 }
+
+$paymentLabels = [
+    'cash' => 'Naqd',
+    'click' => 'Click (karta)',
+];
+$allowedPaymentMethods = array_keys($paymentLabels);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $formType = $_POST['form_type'] ?? '';
@@ -24,24 +30,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $title = trim($_POST['title'] ?? '');
             $buyPrice = tofloat($_POST['buy_price'] ?? '0');
             $sellPrice = tofloat($_POST['sell_price'] ?? '0');
-            $quantity = (int)($_POST['quantity'] ?? 0);
+            $quantity = (int) ($_POST['quantity'] ?? 0);
 
             if ($title === '' || $buyPrice <= 0 || $sellPrice <= 0 || $quantity < 0) {
                 $errors[] = 'Maʼlumotlarni toʼgʼri kiriting. Narxlar 0 dan katta, miqdor esa manfiy boʼlmasligi kerak.';
             } else {
                 if ($formType === 'create') {
-                    $stmt = $pdo->prepare('INSERT INTO books (account, title, author, category, buy_price, sell_price, quantity) VALUES (?, ?, "", "", ?, ?, ?)');
+                    $stmt = $pdo->prepare('INSERT INTO books (account, title, author, category, buy_price, sell_price, quantity, last_quantity_snapshot, last_quantity_change) VALUES (?, ?, "", "", ?, ?, ?, NULL, 0)');
                     $stmt->execute([$account, $title, $buyPrice, $sellPrice, $quantity]);
                     $messages[] = 'Kitob muvaffaqiyatli qoʼshildi!';
                 } else {
-                    $bookId = (int)($_POST['book_id'] ?? 0);
-                    $stmt = $pdo->prepare('SELECT id FROM books WHERE id = ? AND account = ?');
+                    $bookId = (int) ($_POST['book_id'] ?? 0);
+                    $stmt = $pdo->prepare('SELECT quantity FROM books WHERE id = ? AND account = ?');
                     $stmt->execute([$bookId, $account]);
-                    if ($stmt->fetchColumn() === false) {
+                    $book = $stmt->fetch(PDO::FETCH_ASSOC);
+                    if (!$book) {
                         $errors[] = 'Kitob topilmadi.';
                     } else {
-                        $update = $pdo->prepare('UPDATE books SET title = ?, buy_price = ?, sell_price = ?, quantity = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND account = ?');
-                        $update->execute([$title, $buyPrice, $sellPrice, $quantity, $bookId, $account]);
+                        $previousQuantity = (int) $book['quantity'];
+                        $difference = $quantity - $previousQuantity;
+                        $snapshot = $difference !== 0 ? $previousQuantity : null;
+                        $update = $pdo->prepare('UPDATE books SET title = ?, buy_price = ?, sell_price = ?, quantity = ?, last_quantity_snapshot = ?, last_quantity_change = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND account = ?');
+                        $update->execute([$title, $buyPrice, $sellPrice, $quantity, $snapshot, $difference, $bookId, $account]);
                         $messages[] = 'Kitob maʼlumotlari yangilandi.';
                     }
                 }
@@ -49,7 +59,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($formType === 'delete') {
-            $bookId = (int)($_POST['book_id'] ?? 0);
+            $bookId = (int) ($_POST['book_id'] ?? 0);
             $stmt = $pdo->prepare('DELETE FROM books WHERE id = ? AND account = ?');
             $stmt->execute([$bookId, $account]);
             if ($stmt->rowCount() > 0) {
@@ -60,30 +70,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($formType === 'sell') {
-            $bookId = (int)($_POST['book_id'] ?? 0);
-            $sellQuantity = (int)($_POST['sell_quantity'] ?? 0);
+            $bookId = (int) ($_POST['book_id'] ?? 0);
+            $sellQuantity = (int) ($_POST['sell_quantity'] ?? 0);
+            $paymentMethod = $_POST['payment_method'] ?? 'cash';
+            $note = trim($_POST['note'] ?? '');
+
             if ($sellQuantity <= 0) {
                 $errors[] = 'Sotiladigan miqdor 1 dan kam boʼlmasligi kerak.';
+            } elseif (!in_array($paymentMethod, $allowedPaymentMethods, true)) {
+                $errors[] = 'Toʼlov usuli notoʼgʼri tanlandi.';
             } else {
                 $stmt = $pdo->prepare('SELECT * FROM books WHERE id = ? AND account = ?');
                 $stmt->execute([$bookId, $account]);
                 $book = $stmt->fetch(PDO::FETCH_ASSOC);
                 if (!$book) {
                     $errors[] = 'Kitob topilmadi.';
-                } elseif ((int)$book['quantity'] < $sellQuantity) {
+                } elseif ((int) $book['quantity'] < $sellQuantity) {
                     $errors[] = 'Yetarli miqdor mavjud emas.';
                 } else {
-                    $totalCost = (float)$book['buy_price'] * $sellQuantity;
-                    $totalRevenue = (float)$book['sell_price'] * $sellQuantity;
+                    $totalCost = (float) $book['buy_price'] * $sellQuantity;
+                    $totalRevenue = (float) $book['sell_price'] * $sellQuantity;
                     $profit = $totalRevenue - $totalCost;
 
                     $pdo->beginTransaction();
                     try {
-                        $insertSale = $pdo->prepare('INSERT INTO sales (account, book_id, quantity, total_cost, total_revenue, profit) VALUES (?, ?, ?, ?, ?, ?)');
-                        $insertSale->execute([$account, $bookId, $sellQuantity, $totalCost, $totalRevenue, $profit]);
+                        $insertSale = $pdo->prepare('INSERT INTO sales (account, book_id, quantity, total_cost, total_revenue, profit, payment_method, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+                        $insertSale->execute([$account, $bookId, $sellQuantity, $totalCost, $totalRevenue, $profit, $paymentMethod, $note !== '' ? $note : null]);
 
-                        $updateBook = $pdo->prepare('UPDATE books SET quantity = quantity - ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?');
-                        $updateBook->execute([$sellQuantity, $bookId]);
+                        $newQuantity = (int) $book['quantity'] - $sellQuantity;
+                        $updateBook = $pdo->prepare('UPDATE books SET quantity = ?, last_quantity_snapshot = ?, last_quantity_change = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND account = ?');
+                        $updateBook->execute([$newQuantity, (int) $book['quantity'], -$sellQuantity, $bookId, $account]);
 
                         $pdo->commit();
                         $messages[] = 'Sotuv muvaffaqiyatli qayd etildi.';
@@ -96,41 +112,56 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($formType === 'edit_sale') {
-            $saleId = (int)($_POST['sale_id'] ?? 0);
-            $newQuantity = (int)($_POST['sale_quantity'] ?? 0);
+            $saleId = (int) ($_POST['sale_id'] ?? 0);
+            $newQuantity = (int) ($_POST['sale_quantity'] ?? 0);
+            $paymentMethod = $_POST['sale_payment_method'] ?? 'cash';
+            $note = trim($_POST['sale_note'] ?? '');
+
             if ($newQuantity <= 0) {
                 $errors[] = 'Sotuv miqdori 1 dan kam boʼlmasligi kerak.';
+            } elseif (!in_array($paymentMethod, $allowedPaymentMethods, true)) {
+                $errors[] = 'Toʼlov usuli notoʼgʼri tanlandi.';
             } else {
-                $stmt = $pdo->prepare('SELECT s.*, b.quantity AS book_quantity, b.buy_price, b.sell_price FROM sales s JOIN books b ON b.id = s.book_id WHERE s.id = ? AND s.account = ?');
+                $stmt = $pdo->prepare('SELECT * FROM sales WHERE id = ? AND account = ?');
                 $stmt->execute([$saleId, $account]);
                 $sale = $stmt->fetch(PDO::FETCH_ASSOC);
                 if (!$sale) {
                     $errors[] = 'Sotuv topilmadi yoki tegishli kitob oʼchirilgan.';
                 } else {
-                    $oldQuantity = (int)$sale['quantity'];
-                    $difference = $newQuantity - $oldQuantity;
-                    if ($difference > 0 && (int)$sale['book_quantity'] < $difference) {
-                        $errors[] = 'Kitob omborida yetarli miqdor mavjud emas.';
+                    $bookStmt = $pdo->prepare('SELECT quantity, buy_price, sell_price FROM books WHERE id = ? AND account = ?');
+                    $bookStmt->execute([(int) $sale['book_id'], $account]);
+                    $book = $bookStmt->fetch(PDO::FETCH_ASSOC);
+                    if (!$book) {
+                        $errors[] = 'Kitob mavjud emas, sotuvni tahrirlab boʼlmaydi.';
                     } else {
-                        $unitCost = $oldQuantity > 0 ? ((float)$sale['total_cost'] / $oldQuantity) : (float)$sale['buy_price'];
-                        $unitRevenue = $oldQuantity > 0 ? ((float)$sale['total_revenue'] / $oldQuantity) : (float)$sale['sell_price'];
-                        $newTotalCost = $unitCost * $newQuantity;
-                        $newTotalRevenue = $unitRevenue * $newQuantity;
-                        $newProfit = $newTotalRevenue - $newTotalCost;
+                        $oldQuantity = (int) $sale['quantity'];
+                        $difference = $newQuantity - $oldQuantity;
+                        $currentStock = (int) $book['quantity'];
+                        if ($difference > 0 && $currentStock < $difference) {
+                            $errors[] = 'Kitob omborida yetarli miqdor mavjud emas.';
+                        } else {
+                            $unitCost = $oldQuantity > 0 ? ((float) $sale['total_cost'] / $oldQuantity) : (float) $book['buy_price'];
+                            $unitRevenue = $oldQuantity > 0 ? ((float) $sale['total_revenue'] / $oldQuantity) : (float) $book['sell_price'];
+                            $newTotalCost = $unitCost * $newQuantity;
+                            $newTotalRevenue = $unitRevenue * $newQuantity;
+                            $newProfit = $newTotalRevenue - $newTotalCost;
 
-                        $pdo->beginTransaction();
-                        try {
-                            $updateBook = $pdo->prepare('UPDATE books SET quantity = quantity - ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?');
-                            $updateBook->execute([$difference, $sale['book_id']]);
+                            $pdo->beginTransaction();
+                            try {
+                                $newBookQuantity = $currentStock - $difference;
+                                $inventoryChange = -$difference;
+                                $updateBook = $pdo->prepare('UPDATE books SET quantity = ?, last_quantity_snapshot = ?, last_quantity_change = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND account = ?');
+                                $updateBook->execute([$newBookQuantity, $currentStock, $inventoryChange, (int) $sale['book_id'], $account]);
 
-                            $updateSale = $pdo->prepare('UPDATE sales SET quantity = ?, total_cost = ?, total_revenue = ?, profit = ? WHERE id = ? AND account = ?');
-                            $updateSale->execute([$newQuantity, $newTotalCost, $newTotalRevenue, $newProfit, $saleId, $account]);
+                                $updateSale = $pdo->prepare('UPDATE sales SET quantity = ?, total_cost = ?, total_revenue = ?, profit = ?, payment_method = ?, note = ? WHERE id = ? AND account = ?');
+                                $updateSale->execute([$newQuantity, $newTotalCost, $newTotalRevenue, $newProfit, $paymentMethod, $note !== '' ? $note : null, $saleId, $account]);
 
-                            $pdo->commit();
-                            $messages[] = 'Sotuv maʼlumotlari yangilandi.';
-                        } catch (Exception $e) {
-                            $pdo->rollBack();
-                            $errors[] = 'Sotuvni yangilashda xatolik: ' . $e->getMessage();
+                                $pdo->commit();
+                                $messages[] = 'Sotuv maʼlumotlari yangilandi.';
+                            } catch (Exception $e) {
+                                $pdo->rollBack();
+                                $errors[] = 'Sotuvni yangilashda xatolik: ' . $e->getMessage();
+                            }
                         }
                     }
                 }
@@ -138,25 +169,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($formType === 'delete_sale') {
-            $saleId = (int)($_POST['sale_id'] ?? 0);
-            $stmt = $pdo->prepare('SELECT s.*, b.id AS book_exists FROM sales s LEFT JOIN books b ON b.id = s.book_id WHERE s.id = ? AND s.account = ?');
+            $saleId = (int) ($_POST['sale_id'] ?? 0);
+            $stmt = $pdo->prepare('SELECT * FROM sales WHERE id = ? AND account = ?');
             $stmt->execute([$saleId, $account]);
             $sale = $stmt->fetch(PDO::FETCH_ASSOC);
             if (!$sale) {
                 $errors[] = 'Sotuv topilmadi.';
-            } elseif (!$sale['book_exists']) {
-                $errors[] = 'Bu sotuvni oʼchirib boʼlmaydi, chunki tegishli kitob mavjud emas.';
             } else {
+                $bookStmt = $pdo->prepare('SELECT quantity FROM books WHERE id = ? AND account = ?');
+                $bookStmt->execute([(int) $sale['book_id'], $account]);
+                $book = $bookStmt->fetch(PDO::FETCH_ASSOC);
+
                 $pdo->beginTransaction();
                 try {
-                    $restoreBook = $pdo->prepare('UPDATE books SET quantity = quantity + ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?');
-                    $restoreBook->execute([(int)$sale['quantity'], $sale['book_id']]);
-
+                    if ($book) {
+                        $currentStock = (int) $book['quantity'];
+                        $restoreQuantity = $currentStock + (int) $sale['quantity'];
+                        $updateBook = $pdo->prepare('UPDATE books SET quantity = ?, last_quantity_snapshot = ?, last_quantity_change = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND account = ?');
+                        $updateBook->execute([$restoreQuantity, $currentStock, (int) $sale['quantity'], (int) $sale['book_id'], $account]);
+                    }
                     $deleteSale = $pdo->prepare('DELETE FROM sales WHERE id = ? AND account = ?');
                     $deleteSale->execute([$saleId, $account]);
 
                     $pdo->commit();
-                    $messages[] = 'Sotuv oʼchirildi va kitob miqdori qayta tiklandi.';
+                    $messages[] = $book
+                        ? 'Sotuv oʼchirildi va kitob miqdori qayta tiklandi.'
+                        : 'Sotuv oʼchirildi, ammo tegishli kitob topilmagani uchun miqdor oʼzgarmadi.';
                 } catch (Exception $e) {
                     $pdo->rollBack();
                     $errors[] = 'Sotuvni oʼchirishda xatolik: ' . $e->getMessage();
@@ -168,7 +206,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$booksStmt = $pdo->prepare('SELECT * FROM books WHERE account = ? ORDER BY title');
+$booksStmt = $pdo->prepare('SELECT * FROM books WHERE account = ? ORDER BY updated_at DESC, title ASC');
 $booksStmt->execute([$account]);
 $books = $booksStmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -180,33 +218,93 @@ $salesSummaryStmt = $pdo->prepare('SELECT COUNT(*) AS sales_count, SUM(quantity)
 $salesSummaryStmt->execute([$account]);
 $salesSummary = $salesSummaryStmt->fetch(PDO::FETCH_ASSOC) ?: ['sales_count' => 0, 'sold_quantity' => 0, 'revenue' => 0, 'profit' => 0];
 
-$salesStmt = $pdo->prepare('SELECT s.*, b.title FROM sales s LEFT JOIN books b ON b.id = s.book_id WHERE s.account = ? ORDER BY s.sold_at DESC');
-$salesStmt->execute([$account]);
+$paymentStatsStmt = $pdo->prepare('SELECT payment_method, COUNT(*) AS sales_count, SUM(quantity) AS quantity, SUM(total_revenue) AS revenue FROM sales WHERE account = ? GROUP BY payment_method');
+$paymentStatsStmt->execute([$account]);
+$paymentStats = [
+    'cash' => ['sales_count' => 0, 'quantity' => 0, 'revenue' => 0.0],
+    'click' => ['sales_count' => 0, 'quantity' => 0, 'revenue' => 0.0],
+];
+foreach ($paymentStatsStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+    $method = $row['payment_method'] ?? 'cash';
+    if (!isset($paymentStats[$method])) {
+        $paymentStats[$method] = ['sales_count' => 0, 'quantity' => 0, 'revenue' => 0.0];
+    }
+    $paymentStats[$method]['sales_count'] = (int) ($row['sales_count'] ?? 0);
+    $paymentStats[$method]['quantity'] = (int) ($row['quantity'] ?? 0);
+    $paymentStats[$method]['revenue'] = (float) ($row['revenue'] ?? 0);
+}
+
+$topSoldStmt = $pdo->prepare('SELECT b.title, SUM(s.quantity) AS sold_quantity, COALESCE(b.quantity, 0) AS remaining_quantity FROM sales s LEFT JOIN books b ON b.id = s.book_id WHERE s.account = ? GROUP BY s.book_id, b.title, b.quantity ORDER BY sold_quantity DESC LIMIT 5');
+$topSoldStmt->execute([$account]);
+$topSold = $topSoldStmt->fetchAll(PDO::FETCH_ASSOC);
+
+$saleFromInput = $_GET['sale_from'] ?? '';
+$saleToInput = $_GET['sale_to'] ?? '';
+$saleFrom = $saleFromInput !== '' ? DateTime::createFromFormat('Y-m-d', $saleFromInput) : null;
+$saleTo = $saleToInput !== '' ? DateTime::createFromFormat('Y-m-d', $saleToInput) : null;
+if ($saleFrom && !$saleTo) {
+    $saleTo = clone $saleFrom;
+}
+if ($saleFrom && $saleTo && $saleFrom > $saleTo) {
+    [$saleFrom, $saleTo] = [$saleTo, $saleFrom];
+}
+
+$salesQuery = 'SELECT s.*, b.title, COALESCE(b.quantity, 0) AS current_quantity FROM sales s LEFT JOIN books b ON b.id = s.book_id WHERE s.account = ?';
+$salesParams = [$account];
+$saleRangeActive = false;
+if ($saleFrom) {
+    $salesQuery .= ' AND s.sold_at >= ?';
+    $salesParams[] = $saleFrom->format('Y-m-d') . ' 00:00:00';
+    $saleRangeActive = true;
+}
+if ($saleTo) {
+    $salesQuery .= ' AND s.sold_at <= ?';
+    $salesParams[] = $saleTo->format('Y-m-d') . ' 23:59:59';
+    $saleRangeActive = true;
+}
+$salesQuery .= ' ORDER BY s.sold_at DESC';
+if (!$saleRangeActive) {
+    $salesQuery .= ' LIMIT 10';
+}
+$salesStmt = $pdo->prepare($salesQuery);
+$salesStmt->execute($salesParams);
 $sales = $salesStmt->fetchAll(PDO::FETCH_ASSOC);
+
+function formatCurrency(float $amount): string
+{
+    return number_format($amount, 2, '.', ' ');
+}
 ?>
 <!DOCTYPE html>
 <html lang="uz">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?= htmlspecialchars($account) ?> hisobi &mdash; Inventar boshqaruvi</title>
+    <title><?= htmlspecialchars($account) ?> hisobi — Inventar boshqaruvi</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-slate-50 text-slate-900">
-    <div class="min-h-screen p-6 space-y-6">
-        <header class="flex flex-wrap items-center justify-between gap-4 bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+<body class="bg-slate-100 text-slate-900">
+    <header class="bg-white border-b border-slate-200">
+        <div class="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-4 py-4">
             <div>
-                <h1 class="text-2xl font-bold text-slate-900"><?= htmlspecialchars($account) ?> hisobidagi kitoblar</h1>
-                <p class="text-slate-600">Inventar, sotuvlar va foyda koʼrsatkichlarini boshqaring.</p>
+                <p class="text-sm uppercase tracking-wider text-slate-500">Hisob</p>
+                <h1 class="text-2xl font-bold text-slate-900"><?= htmlspecialchars($account) ?> inventari</h1>
+                <p class="text-sm text-slate-600">Kitoblarni boshqaring, sotuvlarni qayd eting va foydani kuzating.</p>
             </div>
-            <div class="flex flex-wrap items-center gap-3">
-                <a href="reports.php?account=<?= urlencode($account) ?>" class="px-4 py-2 rounded-xl bg-indigo-500 text-white hover:bg-indigo-600 transition">Hisobotlar</a>
-                <a href="index.php" class="px-4 py-2 rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-100 transition">&larr; Bosh sahifaga qaytish</a>
+            <div class="flex items-center gap-3">
+                <a href="reports.php?account=<?= urlencode($account) ?>" class="inline-flex items-center gap-2 rounded-full border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100">
+                    <span>Hisobotlar</span>
+                </a>
+                <a href="index.php" class="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800">
+                    <span>&larr; Hisoblarni tanlash</span>
+                </a>
             </div>
-        </header>
+        </div>
+    </header>
 
+    <main class="mx-auto max-w-6xl space-y-6 px-4 py-6">
         <?php if ($errors): ?>
-            <div class="bg-red-100 border border-red-300 text-red-800 rounded-xl p-4">
+            <div class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
                 <ul class="list-disc list-inside space-y-1">
                     <?php foreach ($errors as $error): ?>
                         <li><?= htmlspecialchars($error) ?></li>
@@ -216,7 +314,7 @@ $sales = $salesStmt->fetchAll(PDO::FETCH_ASSOC);
         <?php endif; ?>
 
         <?php if ($messages): ?>
-            <div class="bg-emerald-100 border border-emerald-300 text-emerald-800 rounded-xl p-4">
+            <div class="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
                 <ul class="list-disc list-inside space-y-1">
                     <?php foreach ($messages as $message): ?>
                         <li><?= htmlspecialchars($message) ?></li>
@@ -225,345 +323,523 @@ $sales = $salesStmt->fetchAll(PDO::FETCH_ASSOC);
             </div>
         <?php endif; ?>
 
-        <section class="grid lg:grid-cols-2 gap-6">
-            <div class="bg-white border border-slate-200 rounded-2xl shadow-sm p-6 space-y-4">
-                <div class="flex items-start justify-between gap-4">
-                    <div>
-                        <h2 class="text-xl font-semibold text-slate-900">Yangi kitob qoʼshish</h2>
-                        <p class="text-slate-600 text-sm">Kitob nomi, xarid va sotish narxlarini kiriting.</p>
+        <section class="grid gap-4 md:grid-cols-2">
+            <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <h2 class="text-lg font-semibold text-slate-900">Inventar koʼrsatkichlari</h2>
+                <dl class="mt-4 grid grid-cols-2 gap-3 text-sm">
+                    <div class="rounded-xl bg-slate-50 p-3">
+                        <dt class="text-slate-500">Kitob turlari</dt>
+                        <dd class="text-xl font-semibold text-slate-900"><?= (int) ($inventorySummary['total_books'] ?? 0) ?></dd>
                     </div>
-                </div>
-                <form method="post" class="grid grid-cols-1 gap-4">
-                    <input type="hidden" name="form_type" value="create">
-                    <div>
-                        <label class="block text-sm font-medium text-slate-700">Kitob nomi</label>
-                        <input type="text" name="title" required class="mt-1 w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sky-400">
+                    <div class="rounded-xl bg-slate-50 p-3">
+                        <dt class="text-slate-500">Jami nusxalar</dt>
+                        <dd class="text-xl font-semibold text-slate-900"><?= (int) ($inventorySummary['total_quantity'] ?? 0) ?></dd>
                     </div>
-                    <div class="grid sm:grid-cols-3 gap-4">
-                        <div>
-                            <label class="block text-sm font-medium text-slate-700">Sotib olish narxi (soʼm)</label>
-                            <input type="number" step="0.01" min="0" name="buy_price" required class="mt-1 w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sky-400">
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-slate-700">Sotish narxi (soʼm)</label>
-                            <input type="number" step="0.01" min="0" name="sell_price" required class="mt-1 w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sky-400">
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-slate-700">Miqdor</label>
-                            <input type="number" min="0" name="quantity" required class="mt-1 w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sky-400">
-                        </div>
+                    <div class="rounded-xl bg-slate-50 p-3">
+                        <dt class="text-slate-500">Xarid qiymati</dt>
+                        <dd class="text-xl font-semibold text-slate-900"><?= formatCurrency((float) ($inventorySummary['total_cost_value'] ?? 0)) ?> soʼm</dd>
                     </div>
-                    <div class="flex justify-end">
-                        <button type="submit" class="px-4 py-2 rounded-xl bg-sky-500 text-white hover:bg-sky-600 transition">Saqlash</button>
-                    </div>
-                </form>
-            </div>
-
-            <div class="bg-white border border-slate-200 rounded-2xl shadow-sm p-6 space-y-4">
-                <div>
-                    <h2 class="text-xl font-semibold text-slate-900">Inventar va sotuv statistikasi</h2>
-                    <p class="text-slate-600 text-sm">Hisobingizdagi umumiy koʼrsatkichlar.</p>
-                </div>
-                <dl class="grid sm:grid-cols-2 gap-4">
-                    <div class="p-4 bg-slate-100 rounded-2xl">
-                        <dt class="text-sm text-slate-600">Kitob turlari soni</dt>
-                        <dd class="text-2xl font-semibold text-slate-900"><?= (int)$inventorySummary['total_books'] ?></dd>
-                    </div>
-                    <div class="p-4 bg-slate-100 rounded-2xl">
-                        <dt class="text-sm text-slate-600">Jami nusxalar</dt>
-                        <dd class="text-2xl font-semibold text-slate-900"><?= (int)$inventorySummary['total_quantity'] ?></dd>
-                    </div>
-                    <div class="p-4 bg-slate-100 rounded-2xl">
-                        <dt class="text-sm text-slate-600">Inventar xarid qiymati</dt>
-                        <dd class="text-2xl font-semibold text-slate-900"><?= number_format((float)$inventorySummary['total_cost_value'], 2, '.', ' ') ?> soʼm</dd>
-                    </div>
-                    <div class="p-4 bg-slate-100 rounded-2xl">
-                        <dt class="text-sm text-slate-600">Potensial tushum</dt>
-                        <dd class="text-2xl font-semibold text-slate-900"><?= number_format((float)$inventorySummary['potential_revenue'], 2, '.', ' ') ?> soʼm</dd>
+                    <div class="rounded-xl bg-slate-50 p-3">
+                        <dt class="text-slate-500">Potensial tushum</dt>
+                        <dd class="text-xl font-semibold text-emerald-600"><?= formatCurrency((float) ($inventorySummary['potential_revenue'] ?? 0)) ?> soʼm</dd>
                     </div>
                 </dl>
-                <div class="border-t border-slate-200 pt-4">
-                    <dl class="grid sm:grid-cols-2 gap-4">
-                        <div class="p-4 bg-emerald-50 rounded-2xl border border-emerald-100">
-                            <dt class="text-sm text-slate-600">Sotuvlar soni</dt>
-                            <dd class="text-2xl font-semibold text-emerald-700"><?= (int)$salesSummary['sales_count'] ?></dd>
-                        </div>
-                        <div class="p-4 bg-emerald-50 rounded-2xl border border-emerald-100">
-                            <dt class="text-sm text-slate-600">Sotilgan nusxalar</dt>
-                            <dd class="text-2xl font-semibold text-emerald-700"><?= (int)$salesSummary['sold_quantity'] ?></dd>
-                        </div>
-                        <div class="p-4 bg-emerald-50 rounded-2xl border border-emerald-100">
-                            <dt class="text-sm text-slate-600">Umumiy tushum</dt>
-                            <dd class="text-2xl font-semibold text-emerald-700"><?= number_format((float)$salesSummary['revenue'], 2, '.', ' ') ?> soʼm</dd>
-                        </div>
-                        <div class="p-4 bg-emerald-50 rounded-2xl border border-emerald-100">
-                            <dt class="text-sm text-slate-600">Umumiy foyda</dt>
-                            <dd class="text-2xl font-semibold text-emerald-700"><?= number_format((float)$salesSummary['profit'], 2, '.', ' ') ?> soʼm</dd>
-                        </div>
-                    </dl>
-                </div>
+            </div>
+            <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <h2 class="text-lg font-semibold text-slate-900">Sotuv koʼrsatkichlari</h2>
+                <dl class="mt-4 grid grid-cols-2 gap-3 text-sm">
+                    <div class="rounded-xl bg-slate-50 p-3">
+                        <dt class="text-slate-500">Sotuvlar soni</dt>
+                        <dd class="text-xl font-semibold text-slate-900"><?= (int) ($salesSummary['sales_count'] ?? 0) ?></dd>
+                    </div>
+                    <div class="rounded-xl bg-slate-50 p-3">
+                        <dt class="text-slate-500">Sotilgan nusxalar</dt>
+                        <dd class="text-xl font-semibold text-slate-900"><?= (int) ($salesSummary['sold_quantity'] ?? 0) ?></dd>
+                    </div>
+                    <div class="rounded-xl bg-slate-50 p-3">
+                        <dt class="text-slate-500">Tushum</dt>
+                        <dd class="text-xl font-semibold text-slate-900"><?= formatCurrency((float) ($salesSummary['revenue'] ?? 0)) ?> soʼm</dd>
+                    </div>
+                    <div class="rounded-xl bg-slate-50 p-3">
+                        <dt class="text-slate-500">Foyda</dt>
+                        <dd class="text-xl font-semibold text-emerald-600"><?= formatCurrency((float) ($salesSummary['profit'] ?? 0)) ?> soʼm</dd>
+                    </div>
+                </dl>
             </div>
         </section>
 
-        <section class="bg-white border border-slate-200 rounded-2xl shadow-sm p-6 space-y-4">
-            <div class="flex flex-wrap items-center justify-between gap-4">
+        <section class="space-y-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div class="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                    <h2 class="text-xl font-semibold text-slate-900">Inventar roʼyxati</h2>
-                    <p class="text-sm text-slate-600">Kitoblarni yangilang, sotuvni boshlang yoki oʼchiring.</p>
+                    <h2 class="text-lg font-semibold text-slate-900">Inventar roʼyxati</h2>
+                    <p class="text-sm text-slate-600">Soʼnggi 10 kitob koʼrsatilgan. «Barchasini koʼrish» tugmasi orqali toʼliq roʼyxatni oching.</p>
+                </div>
+                <div class="flex gap-2 text-sm">
+                    <div class="rounded-full bg-emerald-50 px-3 py-1 text-emerald-600">Naqd: <?= (int) $paymentStats['cash']['quantity'] ?> ta</div>
+                    <div class="rounded-full bg-sky-50 px-3 py-1 text-sky-600">Click: <?= (int) $paymentStats['click']['quantity'] ?> ta</div>
                 </div>
             </div>
             <div class="overflow-x-auto">
-                <table class="min-w-full divide-y divide-slate-200">
-                    <thead class="bg-slate-100">
+                <table class="min-w-full divide-y divide-slate-200 text-sm">
+                    <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                         <tr>
-                            <th class="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Kitob nomi</th>
-                            <th class="px-4 py-3 text-right text-xs font-semibold text-slate-600 uppercase tracking-wider">Sotib olish narxi</th>
-                            <th class="px-4 py-3 text-right text-xs font-semibold text-slate-600 uppercase tracking-wider">Sotish narxi</th>
-                            <th class="px-4 py-3 text-right text-xs font-semibold text-slate-600 uppercase tracking-wider">Miqdor</th>
-                            <th class="px-4 py-3 text-right text-xs font-semibold text-slate-600 uppercase tracking-wider">Amallar</th>
+                            <th class="px-4 py-3 text-left">Kitob nomi</th>
+                            <th class="px-4 py-3 text-left">Narxlar</th>
+                            <th class="px-4 py-3 text-left">Miqdor</th>
+                            <th class="px-4 py-3 text-right">Potensial foyda</th>
+                            <th class="px-4 py-3 text-right">Amallar</th>
                         </tr>
                     </thead>
-                    <tbody class="bg-white divide-y divide-slate-100">
+                    <tbody class="divide-y divide-slate-100">
                         <?php if (!$books): ?>
                             <tr>
-                                <td colspan="5" class="px-4 py-6 text-center text-slate-500">Hozircha kitoblar mavjud emas.</td>
+                                <td colspan="5" class="px-4 py-6 text-center text-slate-500">Inventar boʼsh.</td>
                             </tr>
                         <?php endif; ?>
-                        <?php foreach ($books as $book): ?>
-                            <tr class="hover:bg-slate-50 transition">
-                                <td class="px-4 py-3 text-sm font-medium text-slate-900"><?= htmlspecialchars($book['title']) ?></td>
-                                <td class="px-4 py-3 text-sm text-right text-slate-600"><?= number_format((float)$book['buy_price'], 2, '.', ' ') ?> soʼm</td>
-                                <td class="px-4 py-3 text-sm text-right text-slate-600"><?= number_format((float)$book['sell_price'], 2, '.', ' ') ?> soʼm</td>
-                                <td class="px-4 py-3 text-sm text-right text-slate-600"><?= (int)$book['quantity'] ?></td>
-                                <td class="px-4 py-3 text-sm">
-                                    <div class="flex items-center justify-end gap-2">
-                                        <button type="button" data-action="edit-book" data-book-id="<?= (int)$book['id'] ?>" data-book-title="<?= htmlspecialchars($book['title'], ENT_QUOTES) ?>" data-book-buy-price="<?= htmlspecialchars($book['buy_price'], ENT_QUOTES) ?>" data-book-sell-price="<?= htmlspecialchars($book['sell_price'], ENT_QUOTES) ?>" data-book-quantity="<?= (int)$book['quantity'] ?>" class="px-3 py-1 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-100">Tahrirlash</button>
-                                        <button type="button" data-action="sell-book" data-book-id="<?= (int)$book['id'] ?>" data-book-title="<?= htmlspecialchars($book['title'], ENT_QUOTES) ?>" data-book-max="<?= (int)$book['quantity'] ?>" class="px-3 py-1 rounded-lg bg-emerald-500 text-white hover:bg-emerald-600">Sotish</button>
-                                        <form method="post" class="inline" onsubmit="return confirm('Rostdan ham oʼchirmoqchimisiz?');">
-                                            <input type="hidden" name="form_type" value="delete">
-                                            <input type="hidden" name="book_id" value="<?= (int)$book['id'] ?>">
-                                            <button type="submit" class="px-3 py-1 rounded-lg border border-red-200 text-red-600 hover:bg-red-50">Oʼchirish</button>
-                                        </form>
+                        <?php foreach ($books as $index => $book): ?>
+                            <?php
+                                $quantity = (int) ($book['quantity'] ?? 0);
+                                $snapshot = isset($book['last_quantity_snapshot']) ? $book['last_quantity_snapshot'] : null;
+                                $change = (int) ($book['last_quantity_change'] ?? 0);
+                                $profitPotential = ((float) ($book['sell_price'] ?? 0) - (float) ($book['buy_price'] ?? 0)) * $quantity;
+                                $rowClasses = 'transition hover:bg-slate-50';
+                                if ($index >= 10) {
+                                    $rowClasses .= ' hidden';
+                                }
+                            ?>
+                            <tr class="<?= $rowClasses ?>" data-book-row="<?= $index ?>">
+                                <td class="px-4 py-3 font-medium text-slate-900">
+                                    <?= htmlspecialchars($book['title']) ?>
+                                    <p class="text-xs text-slate-500">Yangilangan: <?= htmlspecialchars(date('Y-m-d', strtotime($book['updated_at'] ?? $book['created_at'] ?? 'now'))) ?></p>
+                                </td>
+                                <td class="px-4 py-3 text-slate-600">
+                                    <div>Xarid: <span class="font-semibold text-slate-900"><?= formatCurrency((float) ($book['buy_price'] ?? 0)) ?></span> soʼm</div>
+                                    <div>Sotuv: <span class="font-semibold text-emerald-600"><?= formatCurrency((float) ($book['sell_price'] ?? 0)) ?></span> soʼm</div>
+                                </td>
+                                <td class="px-4 py-3 text-slate-600">
+                                    <div class="text-base font-semibold text-slate-900">
+                                        <?php if ($change !== 0 && $snapshot !== null): ?>
+                                            <?= (int) $snapshot ?>
+                                            <sup class="text-xs font-semibold <?= $change > 0 ? 'text-emerald-600' : 'text-rose-500' ?>">
+                                                <?= $change > 0 ? '+' : '' ?><?= $change ?>
+                                            </sup>
+                                        <?php else: ?>
+                                            <?= $quantity ?>
+                                        <?php endif; ?>
                                     </div>
+                                    <div class="text-xs text-slate-500">Jami: <?= $quantity ?> ta</div>
+                                </td>
+                                <td class="px-4 py-3 text-right font-semibold text-emerald-600">
+                                    <?= formatCurrency($profitPotential) ?> soʼm
+                                </td>
+                                <td class="px-4 py-3 text-right space-x-2">
+                                    <button type="button" data-open-sell
+                                        data-book-id="<?= (int) $book['id'] ?>"
+                                        data-book-title="<?= htmlspecialchars($book['title'], ENT_QUOTES) ?>"
+                                        data-book-quantity="<?= $quantity ?>"
+                                        class="inline-flex items-center rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-200">Sotish</button>
+                                    <button type="button" data-open-book-edit
+                                        data-book-id="<?= (int) $book['id'] ?>"
+                                        data-book-title="<?= htmlspecialchars($book['title'], ENT_QUOTES) ?>"
+                                        data-book-buy="<?= (float) ($book['buy_price'] ?? 0) ?>"
+                                        data-book-sell="<?= (float) ($book['sell_price'] ?? 0) ?>"
+                                        data-book-quantity="<?= $quantity ?>"
+                                        class="inline-flex items-center rounded-full bg-sky-100 px-3 py-1 text-xs font-semibold text-sky-700 transition hover:bg-sky-200">Tahrirlash</button>
+                                    <form method="post" class="inline" onsubmit="return confirm('Kitobni oʼchirilsinmi?');">
+                                        <input type="hidden" name="form_type" value="delete">
+                                        <input type="hidden" name="book_id" value="<?= (int) $book['id'] ?>">
+                                        <button type="submit" class="inline-flex items-center rounded-full bg-rose-100 px-3 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-200">Oʼchirish</button>
+                                    </form>
                                 </td>
                             </tr>
                         <?php endforeach; ?>
                     </tbody>
                 </table>
             </div>
+            <?php if (count($books) > 10): ?>
+                <div class="flex justify-center">
+                    <button type="button" data-action="show-all-books" class="rounded-full border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100">Barchasini koʼrish</button>
+                </div>
+            <?php endif; ?>
         </section>
 
-        <section class="bg-white border border-slate-200 rounded-2xl shadow-sm p-6 space-y-4">
-            <div class="flex flex-wrap items-center justify-between gap-4">
+        <section class="space-y-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div class="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                    <h2 class="text-xl font-semibold text-slate-900">Sotilgan kitoblar jurnali</h2>
-                    <p class="text-sm text-slate-600">Har bir sotuv uchun maʼlumotlarni koʼrib chiqing, tahrirlang yoki oʼchiring.</p>
+                    <h2 class="text-lg font-semibold text-slate-900">Sotilgan kitoblar jurnali</h2>
+                    <p class="text-sm text-slate-600">Soʼnggi 10 sotuv koʼrsatiladi. Sana oraligʼini tanlab, kerakli davrni koʼring.</p>
+                </div>
+                <div class="flex gap-3 text-sm">
+                    <div class="rounded-full bg-emerald-50 px-3 py-1 text-emerald-600">Naqd tushum: <?= formatCurrency((float) $paymentStats['cash']['revenue']) ?> soʼm</div>
+                    <div class="rounded-full bg-sky-50 px-3 py-1 text-sky-600">Click tushum: <?= formatCurrency((float) $paymentStats['click']['revenue']) ?> soʼm</div>
                 </div>
             </div>
+
+            <form method="get" class="grid gap-4 md:grid-cols-[repeat(2,minmax(0,1fr))_auto_auto]">
+                <input type="hidden" name="account" value="<?= htmlspecialchars($account) ?>">
+                <div>
+                    <label class="block text-sm font-medium text-slate-600">Boshlanish sanasi</label>
+                    <input type="date" name="sale_from" value="<?= htmlspecialchars($saleFrom ? $saleFrom->format('Y-m-d') : '') ?>" class="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-600">Tugash sanasi</label>
+                    <input type="date" name="sale_to" value="<?= htmlspecialchars($saleTo ? $saleTo->format('Y-m-d') : '') ?>" class="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                </div>
+                <div class="flex items-end">
+                    <button type="submit" class="w-full rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-600">Filtrlash</button>
+                </div>
+                <div class="flex items-end">
+                    <a href="konto.php?account=<?= urlencode($account) ?>" class="w-full rounded-xl border border-slate-300 px-4 py-2 text-center text-sm font-medium text-slate-700 transition hover:bg-slate-100">Tozalash</a>
+                </div>
+            </form>
+
             <div class="overflow-x-auto">
-                <table class="min-w-full divide-y divide-slate-200">
-                    <thead class="bg-slate-100">
+                <table class="min-w-full divide-y divide-slate-200 text-sm">
+                    <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                         <tr>
-                            <th class="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Sana</th>
-                            <th class="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Kitob</th>
-                            <th class="px-4 py-3 text-right text-xs font-semibold text-slate-600 uppercase tracking-wider">Miqdor</th>
-                            <th class="px-4 py-3 text-right text-xs font-semibold text-slate-600 uppercase tracking-wider">Tushum</th>
-                            <th class="px-4 py-3 text-right text-xs font-semibold text-slate-600 uppercase tracking-wider">Foyda</th>
-                            <th class="px-4 py-3 text-right text-xs font-semibold text-slate-600 uppercase tracking-wider">Amallar</th>
+                            <th class="px-4 py-3 text-left">Sana</th>
+                            <th class="px-4 py-3 text-left">Kitob</th>
+                            <th class="px-4 py-3 text-right">Miqdor</th>
+                            <th class="px-4 py-3 text-left">Toʼlov</th>
+                            <th class="px-4 py-3 text-right">Tushum</th>
+                            <th class="px-4 py-3 text-right">Foyda</th>
+                            <th class="px-4 py-3 text-left">Izoh</th>
+                            <th class="px-4 py-3 text-right">Amallar</th>
                         </tr>
                     </thead>
-                    <tbody class="bg-white divide-y divide-slate-100">
+                    <tbody class="divide-y divide-slate-100">
                         <?php if (!$sales): ?>
                             <tr>
-                                <td colspan="6" class="px-4 py-6 text-center text-slate-500">Hozircha sotuvlar qayd etilmagan.</td>
+                                <td colspan="8" class="px-4 py-6 text-center text-slate-500">Sotuvlar topilmadi.</td>
                             </tr>
                         <?php endif; ?>
                         <?php foreach ($sales as $sale): ?>
-                            <tr class="hover:bg-slate-50 transition">
-                                <td class="px-4 py-3 text-sm text-slate-600"><?= htmlspecialchars(date('Y-m-d H:i', strtotime($sale['sold_at']))) ?></td>
-                                <td class="px-4 py-3 text-sm font-medium text-slate-900"><?= htmlspecialchars($sale['title'] ?? 'Kitob oʼchirib tashlangan') ?></td>
-                                <td class="px-4 py-3 text-sm text-right text-slate-600"><?= (int)$sale['quantity'] ?></td>
-                                <td class="px-4 py-3 text-sm text-right text-slate-600"><?= number_format((float)$sale['total_revenue'], 2, '.', ' ') ?> soʼm</td>
-                                <td class="px-4 py-3 text-sm text-right text-emerald-600 font-semibold"><?= number_format((float)$sale['profit'], 2, '.', ' ') ?> soʼm</td>
-                                <td class="px-4 py-3 text-sm">
-                                    <div class="flex items-center justify-end gap-2">
-                                        <button type="button" data-action="edit-sale" data-sale-id="<?= (int)$sale['id'] ?>" data-sale-quantity="<?= (int)$sale['quantity'] ?>" data-sale-title="<?= htmlspecialchars($sale['title'] ?? 'Kitob oʼchirib tashlangan', ENT_QUOTES) ?>" class="px-3 py-1 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-100" <?= $sale['title'] ? '' : 'disabled' ?>>Tahrirlash</button>
-                                        <form method="post" class="inline" onsubmit="return confirm('Sotuvni oʼchirishni tasdiqlaysizmi?');">
-                                            <input type="hidden" name="form_type" value="delete_sale">
-                                            <input type="hidden" name="sale_id" value="<?= (int)$sale['id'] ?>">
-                                            <button type="submit" class="px-3 py-1 rounded-lg border border-red-200 text-red-600 hover:bg-red-50" <?= $sale['title'] ? '' : 'disabled' ?>>Oʼchirish</button>
-                                        </form>
-                                    </div>
+                            <?php $canEditSale = !empty($sale['title']); ?>
+                            <tr class="transition hover:bg-slate-50">
+                                <td class="px-4 py-3 text-slate-600">
+                                    <div class="font-semibold text-slate-900"><?= htmlspecialchars(date('Y-m-d', strtotime($sale['sold_at']))) ?></div>
+                                    <div class="text-xs text-slate-500"><?= htmlspecialchars(date('H:i', strtotime($sale['sold_at']))) ?></div>
+                                </td>
+                                <td class="px-4 py-3 font-medium text-slate-900"><?= htmlspecialchars($sale['title'] ?? 'Kitob oʼchirib tashlangan') ?></td>
+                                <td class="px-4 py-3 text-right text-slate-600"><?= (int) $sale['quantity'] ?></td>
+                                <td class="px-4 py-3 text-left">
+                                    <span class="inline-flex items-center rounded-full px-2 py-1 text-xs font-semibold <?= ($sale['payment_method'] ?? 'cash') === 'cash' ? 'bg-emerald-100 text-emerald-700' : 'bg-sky-100 text-sky-700' ?>">
+                                        <?= htmlspecialchars($paymentLabels[$sale['payment_method'] ?? 'cash'] ?? $sale['payment_method']) ?>
+                                    </span>
+                                </td>
+                                <td class="px-4 py-3 text-right text-slate-600"><?= formatCurrency((float) $sale['total_revenue']) ?> soʼm</td>
+                                <td class="px-4 py-3 text-right font-semibold text-emerald-600"><?= formatCurrency((float) $sale['profit']) ?> soʼm</td>
+                                <td class="px-4 py-3 text-slate-600">
+                                    <?php if (!empty($sale['note'])): ?>
+                                        <span class="block text-xs uppercase text-slate-400">Izoh</span>
+                                        <span><?= nl2br(htmlspecialchars($sale['note'])) ?></span>
+                                    <?php else: ?>
+                                        <span class="text-xs text-slate-400">Izoh qoʼyilmagan</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td class="px-4 py-3 text-right space-x-2">
+                                    <?php if ($canEditSale): ?>
+                                        <button type="button" data-open-sale
+                                            data-sale-id="<?= (int) $sale['id'] ?>"
+                                            data-sale-quantity="<?= (int) $sale['quantity'] ?>"
+                                            data-sale-payment="<?= htmlspecialchars($sale['payment_method'] ?? 'cash', ENT_QUOTES) ?>"
+                                            data-sale-note="<?= htmlspecialchars($sale['note'] ?? '', ENT_QUOTES) ?>"
+                                            data-sale-stock="<?= (int) $sale['current_quantity'] ?>"
+                                            class="inline-flex items-center rounded-full bg-sky-100 px-3 py-1 text-xs font-semibold text-sky-700 transition hover:bg-sky-200">Tahrirlash</button>
+                                    <?php else: ?>
+                                        <span class="inline-flex cursor-not-allowed items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-400" title="Kitob oʼchirib tashlangan">Tahrirlash</span>
+                                    <?php endif; ?>
+                                    <form method="post" class="inline" onsubmit="return confirm('Sotuv oʼchirilsinmi?');">
+                                        <input type="hidden" name="form_type" value="delete_sale">
+                                        <input type="hidden" name="sale_id" value="<?= (int) $sale['id'] ?>">
+                                        <button type="submit" class="inline-flex items-center rounded-full bg-rose-100 px-3 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-200">Oʼchirish</button>
+                                    </form>
                                 </td>
                             </tr>
                         <?php endforeach; ?>
                     </tbody>
                 </table>
             </div>
-        </section>
-    </div>
 
-    <div id="editBookModal" class="fixed inset-0 hidden items-center justify-center px-4 z-50">
-        <div class="absolute inset-0 bg-slate-900/50" data-modal-close></div>
-        <div class="relative w-full max-w-lg bg-white rounded-2xl shadow-xl p-6 space-y-4">
-            <div class="flex items-start justify-between">
-                <h3 class="text-xl font-semibold text-slate-900">Kitobni tahrirlash</h3>
-                <button type="button" class="text-slate-500 hover:text-slate-700" data-modal-close>&times;</button>
+            <?php if ($topSold): ?>
+                <div class="grid gap-3 text-sm md:grid-cols-3">
+                    <?php foreach ($topSold as $row): ?>
+                        <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                            <div class="truncate font-semibold text-slate-900" title="<?= htmlspecialchars($row['title'] ?? 'Kitob') ?>"><?= htmlspecialchars($row['title'] ?? 'Kitob') ?></div>
+                            <div class="mt-2 text-slate-600">Sotilgan: <span class="font-semibold text-slate-900"><?= (int) ($row['sold_quantity'] ?? 0) ?></span> ta</div>
+                            <div class="text-slate-600">Omborda: <span class="font-semibold text-emerald-600"><?= (int) ($row['remaining_quantity'] ?? 0) ?></span> ta</div>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
+        </section>
+    </main>
+
+    <button type="button" data-open-book-create class="fixed bottom-6 right-6 inline-flex items-center gap-2 rounded-full bg-emerald-500 px-5 py-3 text-sm font-semibold text-white shadow-lg transition hover:bg-emerald-600 focus:outline-none focus:ring-4 focus:ring-emerald-300">
+        <span class="text-lg">＋</span>
+        <span>Kitob qoʼshish</span>
+    </button>
+
+    <div id="modal-backdrop" class="fixed inset-0 z-40 hidden bg-slate-900/40 backdrop-blur"></div>
+
+    <div id="book-modal" class="fixed inset-0 z-50 hidden items-center justify-center px-4">
+        <div class="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
+            <div class="flex items-start justify-between gap-3">
+                <div>
+                    <h2 id="book-modal-title" class="text-lg font-semibold text-slate-900">Kitob qoʼshish</h2>
+                    <p id="book-modal-subtitle" class="text-sm text-slate-600">Inventarga yangi kitob qoʼshing.</p>
+                </div>
+                <button type="button" data-close-modal class="text-slate-400 transition hover:text-slate-600">✕</button>
             </div>
-            <form method="post" id="editBookForm" class="grid grid-cols-1 gap-4">
-                <input type="hidden" name="form_type" value="update">
-                <input type="hidden" name="book_id" id="editBookId">
+            <form method="post" class="mt-4 space-y-4" id="book-form">
+                <input type="hidden" name="form_type" value="create">
+                <input type="hidden" name="book_id" value="">
                 <div>
                     <label class="block text-sm font-medium text-slate-700">Kitob nomi</label>
-                    <input type="text" name="title" id="editBookTitle" required class="mt-1 w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sky-400">
+                    <input type="text" name="title" required class="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400">
                 </div>
-                <div class="grid sm:grid-cols-3 gap-4">
+                <div class="grid gap-3 md:grid-cols-2">
                     <div>
-                        <label class="block text-sm font-medium text-slate-700">Sotib olish narxi (soʼm)</label>
-                        <input type="number" step="0.01" min="0" name="buy_price" id="editBookBuyPrice" required class="mt-1 w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sky-400">
+                        <label class="block text-sm font-medium text-slate-700">Xarid narxi</label>
+                        <input type="number" name="buy_price" min="0" step="0.01" required class="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400">
                     </div>
                     <div>
-                        <label class="block text-sm font-medium text-slate-700">Sotish narxi (soʼm)</label>
-                        <input type="number" step="0.01" min="0" name="sell_price" id="editBookSellPrice" required class="mt-1 w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sky-400">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-slate-700">Miqdor</label>
-                        <input type="number" min="0" name="quantity" id="editBookQuantity" required class="mt-1 w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sky-400">
+                        <label class="block text-sm font-medium text-slate-700">Sotuv narxi</label>
+                        <input type="number" name="sell_price" min="0" step="0.01" required class="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400">
                     </div>
                 </div>
-                <div class="flex justify-end gap-3">
-                    <button type="button" class="px-4 py-2 rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-100" data-modal-close>Bekor qilish</button>
-                    <button type="submit" class="px-4 py-2 rounded-xl bg-sky-500 text-white hover:bg-sky-600">Saqlash</button>
+                <div>
+                    <label class="block text-sm font-medium text-slate-700">Miqdor</label>
+                    <input type="number" name="quantity" min="0" required class="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                </div>
+                <div class="flex justify-end gap-2">
+                    <button type="button" data-close-modal class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100">Bekor qilish</button>
+                    <button type="submit" class="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-600">Saqlash</button>
                 </div>
             </form>
         </div>
     </div>
 
-    <div id="sellBookModal" class="fixed inset-0 hidden items-center justify-center px-4 z-50">
-        <div class="absolute inset-0 bg-slate-900/50" data-modal-close></div>
-        <div class="relative w-full max-w-md bg-white rounded-2xl shadow-xl p-6 space-y-4">
-            <div class="flex items-start justify-between">
-                <h3 class="text-xl font-semibold text-slate-900" id="sellModalTitle">Kitobni sotish</h3>
-                <button type="button" class="text-slate-500 hover:text-slate-700" data-modal-close>&times;</button>
+    <div id="sell-modal" class="fixed inset-0 z-50 hidden items-center justify-center px-4">
+        <div class="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
+            <div class="flex items-start justify-between gap-3">
+                <div>
+                    <h2 class="text-lg font-semibold text-slate-900">Sotuvni qayd etish</h2>
+                    <p id="sell-modal-info" class="text-sm text-slate-600">Kitobni soting va toʼlov maʼlumotlarini kiriting.</p>
+                </div>
+                <button type="button" data-close-modal class="text-slate-400 transition hover:text-slate-600">✕</button>
             </div>
-            <form method="post" id="sellBookForm" class="space-y-4">
+            <form method="post" class="mt-4 space-y-4" id="sell-form">
                 <input type="hidden" name="form_type" value="sell">
-                <input type="hidden" name="book_id" id="sellBookId">
+                <input type="hidden" name="book_id" value="">
                 <div>
                     <label class="block text-sm font-medium text-slate-700">Sotiladigan miqdor</label>
-                    <input type="number" min="1" name="sell_quantity" id="sellBookQuantity" required class="mt-1 w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sky-400">
-                    <p class="text-xs text-slate-500 mt-1" id="sellBookHint"></p>
+                    <input type="number" name="sell_quantity" min="1" required class="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                    <p id="sell-quantity-helper" class="mt-1 text-xs text-slate-500"></p>
                 </div>
-                <div class="flex justify-end gap-3">
-                    <button type="button" class="px-4 py-2 rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-100" data-modal-close>Bekor qilish</button>
-                    <button type="submit" class="px-4 py-2 rounded-xl bg-emerald-500 text-white hover:bg-emerald-600">Tasdiqlash</button>
+                <div>
+                    <span class="mb-1 block text-sm font-medium text-slate-700">Toʼlov usuli</span>
+                    <div class="grid grid-cols-2 gap-2">
+                        <?php foreach ($paymentLabels as $value => $label): ?>
+                            <label class="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm transition hover:border-emerald-400">
+                                <input type="radio" name="payment_method" value="<?= htmlspecialchars($value) ?>" <?= $value === 'cash' ? 'checked' : '' ?> class="text-emerald-500 focus:ring-emerald-500">
+                                <span><?= htmlspecialchars($label) ?></span>
+                            </label>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-700">Izoh (ixtiyoriy)</label>
+                    <textarea name="note" rows="3" class="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400" placeholder="Masalan: Click orqali toʼlandi"></textarea>
+                </div>
+                <div class="flex justify-end gap-2">
+                    <button type="button" data-close-modal class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100">Bekor qilish</button>
+                    <button type="submit" id="sell-submit" class="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-600">Sotuvni saqlash</button>
                 </div>
             </form>
         </div>
     </div>
 
-    <div id="editSaleModal" class="fixed inset-0 hidden items-center justify-center px-4 z-50">
-        <div class="absolute inset-0 bg-slate-900/50" data-modal-close></div>
-        <div class="relative w-full max-w-md bg-white rounded-2xl shadow-xl p-6 space-y-4">
-            <div class="flex items-start justify-between">
-                <h3 class="text-xl font-semibold text-slate-900" id="saleModalTitle">Sotuvni tahrirlash</h3>
-                <button type="button" class="text-slate-500 hover:text-slate-700" data-modal-close>&times;</button>
+    <div id="sale-modal" class="fixed inset-0 z-50 hidden items-center justify-center px-4">
+        <div class="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
+            <div class="flex items-start justify-between gap-3">
+                <div>
+                    <h2 class="text-lg font-semibold text-slate-900">Sotuvni tahrirlash</h2>
+                    <p class="text-sm text-slate-600">Miqдор va toʼlov maʼlumotlarini yangilang.</p>
+                </div>
+                <button type="button" data-close-modal class="text-slate-400 transition hover:text-slate-600">✕</button>
             </div>
-            <form method="post" id="editSaleForm" class="space-y-4">
+            <form method="post" class="mt-4 space-y-4" id="sale-form">
                 <input type="hidden" name="form_type" value="edit_sale">
-                <input type="hidden" name="sale_id" id="editSaleId">
+                <input type="hidden" name="sale_id" value="">
                 <div>
                     <label class="block text-sm font-medium text-slate-700">Sotilgan miqdor</label>
-                    <input type="number" min="1" name="sale_quantity" id="editSaleQuantity" required class="mt-1 w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sky-400">
+                    <input type="number" name="sale_quantity" min="1" required class="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                    <p id="sale-quantity-helper" class="mt-1 text-xs text-slate-500"></p>
                 </div>
-                <div class="flex justify-end gap-3">
-                    <button type="button" class="px-4 py-2 rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-100" data-modal-close>Bekor qilish</button>
-                    <button type="submit" class="px-4 py-2 rounded-xl bg-indigo-500 text-white hover:bg-indigo-600">Saqlash</button>
+                <div>
+                    <span class="mb-1 block text-sm font-medium text-slate-700">Toʼlov usuli</span>
+                    <div class="grid grid-cols-2 gap-2">
+                        <?php foreach ($paymentLabels as $value => $label): ?>
+                            <label class="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm transition hover:border-emerald-400">
+                                <input type="radio" name="sale_payment_method" value="<?= htmlspecialchars($value) ?>" <?= $value === 'cash' ? 'checked' : '' ?> class="text-emerald-500 focus:ring-emerald-500">
+                                <span><?= htmlspecialchars($label) ?></span>
+                            </label>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-700">Izoh</label>
+                    <textarea name="sale_note" rows="3" class="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400"></textarea>
+                </div>
+                <div class="flex justify-end gap-2">
+                    <button type="button" data-close-modal class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100">Bekor qilish</button>
+                    <button type="submit" id="sale-submit" class="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-600">Oʼzgarishni saqlash</button>
                 </div>
             </form>
         </div>
     </div>
 
     <script>
+    document.addEventListener('DOMContentLoaded', () => {
         const body = document.body;
-        const editBookModal = document.getElementById('editBookModal');
-        const sellBookModal = document.getElementById('sellBookModal');
-        const editSaleModal = document.getElementById('editSaleModal');
+        const backdrop = document.getElementById('modal-backdrop');
+        const bookModal = document.getElementById('book-modal');
+        const sellModal = document.getElementById('sell-modal');
+        const saleModal = document.getElementById('sale-modal');
+        const modals = [bookModal, sellModal, saleModal];
 
         function openModal(modal) {
             if (!modal) return;
+            if (backdrop) {
+                backdrop.classList.remove('hidden');
+            }
+            modals.forEach((el) => {
+                if (el && el !== modal) {
+                    el.classList.add('hidden');
+                    el.classList.remove('flex');
+                }
+            });
             modal.classList.remove('hidden');
             modal.classList.add('flex');
             body.classList.add('overflow-hidden');
         }
 
-        function closeModal(modal) {
-            if (!modal) return;
-            modal.classList.remove('flex');
-            modal.classList.add('hidden');
-            if (!document.querySelector('.fixed.inset-0.flex:not(.hidden)')) {
-                body.classList.remove('overflow-hidden');
+        function closeModals() {
+            if (backdrop) {
+                backdrop.classList.add('hidden');
             }
+            modals.forEach((modal) => {
+                if (modal) {
+                    modal.classList.add('hidden');
+                    modal.classList.remove('flex');
+                }
+            });
+            body.classList.remove('overflow-hidden');
         }
 
-        document.querySelectorAll('[data-modal-close]').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const modal = btn.closest('.fixed');
-                closeModal(modal);
-            });
+        document.querySelectorAll('[data-close-modal]').forEach((button) => {
+            button.addEventListener('click', closeModals);
+        });
+        if (backdrop) {
+            backdrop.addEventListener('click', closeModals);
+        }
+        window.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape') {
+                closeModals();
+            }
         });
 
-        document.querySelectorAll('[data-action="edit-book"]').forEach(button => {
+        const bookForm = document.getElementById('book-form');
+        const bookModalTitle = document.getElementById('book-modal-title');
+        const bookModalSubtitle = document.getElementById('book-modal-subtitle');
+        const createButton = document.querySelector('[data-open-book-create]');
+        if (createButton) {
+            createButton.addEventListener('click', () => {
+                bookForm.reset();
+                bookForm.form_type.value = 'create';
+                bookForm.book_id.value = '';
+                bookModalTitle.textContent = 'Kitob qoʼshish';
+                bookModalSubtitle.textContent = 'Inventarga yangi kitob qoʼshing.';
+                openModal(bookModal);
+            });
+        }
+        document.querySelectorAll('[data-open-book-edit]').forEach((button) => {
             button.addEventListener('click', () => {
-                document.getElementById('editBookId').value = button.dataset.bookId;
-                document.getElementById('editBookTitle').value = button.dataset.bookTitle;
-                document.getElementById('editBookBuyPrice').value = button.dataset.bookBuyPrice;
-                document.getElementById('editBookSellPrice').value = button.dataset.bookSellPrice;
-                document.getElementById('editBookQuantity').value = button.dataset.bookQuantity;
-                openModal(editBookModal);
+                const id = button.getAttribute('data-book-id');
+                const title = button.getAttribute('data-book-title') || '';
+                const buy = button.getAttribute('data-book-buy') || '0';
+                const sellPrice = button.getAttribute('data-book-sell') || '0';
+                const quantity = button.getAttribute('data-book-quantity') || '0';
+                bookForm.form_type.value = 'update';
+                bookForm.book_id.value = id;
+                bookForm.title.value = title;
+                bookForm.buy_price.value = buy;
+                bookForm.sell_price.value = sellPrice;
+                bookForm.quantity.value = quantity;
+                bookModalTitle.textContent = 'Kitobni tahrirlash';
+                bookModalSubtitle.textContent = 'Kitob maʼlumotlarini yangilang.';
+                openModal(bookModal);
             });
         });
 
-        const sellSubmitButton = document.querySelector('#sellBookForm button[type="submit"]');
-
-        document.querySelectorAll('[data-action="sell-book"]').forEach(button => {
+        const sellForm = document.getElementById('sell-form');
+        const sellHelper = document.getElementById('sell-quantity-helper');
+        const sellInfo = document.getElementById('sell-modal-info');
+        const sellSubmit = document.getElementById('sell-submit');
+        document.querySelectorAll('[data-open-sell]').forEach((button) => {
             button.addEventListener('click', () => {
-                const max = parseInt(button.dataset.bookMax, 10) || 0;
-                document.getElementById('sellBookId').value = button.dataset.bookId;
-                document.getElementById('sellBookQuantity').value = max > 0 ? 1 : 0;
-                document.getElementById('sellBookQuantity').max = max;
-                document.getElementById('sellBookHint').textContent = max > 0 ? `Omborda mavjud: ${max} ta.` : 'Bu kitob omborda qolmagan.';
-                document.getElementById('sellBookQuantity').readOnly = max === 0;
-                document.getElementById('sellModalTitle').textContent = `"${button.dataset.bookTitle}" kitobini sotish`;
-                if (sellSubmitButton) {
-                    sellSubmitButton.disabled = max === 0;
-                    sellSubmitButton.classList.toggle('opacity-50', max === 0);
-                    sellSubmitButton.classList.toggle('cursor-not-allowed', max === 0);
+                const id = button.getAttribute('data-book-id');
+                const title = button.getAttribute('data-book-title') || '';
+                const quantity = parseInt(button.getAttribute('data-book-quantity') || '0', 10);
+                sellForm.reset();
+                sellForm.book_id.value = id;
+                sellForm.sell_quantity.disabled = quantity <= 0;
+                if (sellSubmit) {
+                    sellSubmit.disabled = quantity <= 0;
+                    sellSubmit.classList.toggle('opacity-50', quantity <= 0);
+                    sellSubmit.classList.toggle('cursor-not-allowed', quantity <= 0);
                 }
-                openModal(sellBookModal);
+                sellForm.sell_quantity.max = Math.max(quantity, 0);
+                sellForm.sell_quantity.value = quantity > 0 ? 1 : '';
+                sellHelper.textContent = quantity > 0 ? `Omborda: ${quantity} ta. Maksimal sotish miqdori ${quantity} ta.` : 'Omborda mavjud emas.';
+                sellInfo.textContent = `${title} — omborda ${quantity} ta.`;
+                openModal(sellModal);
             });
         });
 
-        document.querySelectorAll('[data-action="edit-sale"]').forEach(button => {
+        const saleForm = document.getElementById('sale-form');
+        const saleHelper = document.getElementById('sale-quantity-helper');
+        document.querySelectorAll('[data-open-sale]').forEach((button) => {
             button.addEventListener('click', () => {
-                if (button.hasAttribute('disabled')) {
-                    return;
-                }
-                document.getElementById('editSaleId').value = button.dataset.saleId;
-                document.getElementById('editSaleQuantity').value = button.dataset.saleQuantity;
-                document.getElementById('saleModalTitle').textContent = `"${button.dataset.saleTitle}" sotuvini tahrirlash`;
-                openModal(editSaleModal);
+                const id = button.getAttribute('data-sale-id');
+                const quantity = parseInt(button.getAttribute('data-sale-quantity') || '0', 10);
+                const stock = parseInt(button.getAttribute('data-sale-stock') || '0', 10);
+                const payment = button.getAttribute('data-sale-payment') || 'cash';
+                const note = button.getAttribute('data-sale-note') || '';
+                saleForm.reset();
+                saleForm.form_type.value = 'edit_sale';
+                saleForm.sale_id.value = id;
+                saleForm.sale_quantity.value = quantity;
+                saleForm.sale_quantity.min = 1;
+                saleForm.sale_quantity.max = quantity + Math.max(stock, 0);
+                saleHelper.textContent = `Hozir omborda ${stock} ta qolgan.`;
+                saleForm.querySelectorAll('input[name="sale_payment_method"]').forEach((radio) => {
+                    radio.checked = radio.value === payment;
+                });
+                saleForm.sale_note.value = note;
+                openModal(saleModal);
             });
         });
 
-        [editBookModal, sellBookModal, editSaleModal].forEach(modal => {
-            if (!modal) return;
-            modal.addEventListener('click', event => {
-                if (event.target.dataset.modalClose !== undefined) {
-                    closeModal(modal);
-                }
+        const showAllButton = document.querySelector('[data-action="show-all-books"]');
+        if (showAllButton) {
+            showAllButton.addEventListener('click', () => {
+                document.querySelectorAll('[data-book-row]').forEach((row) => row.classList.remove('hidden'));
+                showAllButton.classList.add('hidden');
             });
-        });
+        }
+    });
     </script>
 </body>
 </html>
