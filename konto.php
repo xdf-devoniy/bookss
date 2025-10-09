@@ -134,6 +134,69 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
+        if ($formType === 'create_debt') {
+            $bookId = (int) ($_POST['book_id'] ?? 0);
+            $debtQuantity = (int) ($_POST['debt_quantity'] ?? 0);
+            $debtorName = trim($_POST['debtor_name'] ?? '');
+            $debtorPhone = trim($_POST['debtor_phone'] ?? '');
+            $debtorGroup = trim($_POST['debtor_group'] ?? '');
+            $pricePerUnit = tofloat($_POST['debt_price'] ?? '0');
+            $note = trim($_POST['debt_note'] ?? '');
+
+            if ($bookId <= 0 || $debtQuantity <= 0) {
+                $errors[] = 'Qarzga berish uchun kitob va miqdorni toʼgʼri tanlang.';
+            } elseif ($debtorName === '') {
+                $errors[] = 'Qarzdor ismini kiriting.';
+            } elseif ($pricePerUnit <= 0) {
+                $errors[] = 'Qarz narxi 0 dan katta boʼlishi kerak.';
+            } else {
+                $stmt = $pdo->prepare('SELECT * FROM books WHERE id = ? AND account = ?');
+                $stmt->execute([$bookId, $account]);
+                $book = $stmt->fetch(PDO::FETCH_ASSOC);
+
+                if (!$book) {
+                    $errors[] = 'Kitob topilmadi.';
+                } elseif ((int) $book['quantity'] < $debtQuantity) {
+                    $errors[] = 'Omborda yetarli miqdor mavjud emas.';
+                } else {
+                    $totalPrice = $pricePerUnit * $debtQuantity;
+                    $buyUnit = (float) ($book['buy_price'] ?? 0);
+                    $pdo->beginTransaction();
+                    try {
+                        $insertDebt = $pdo->prepare('INSERT INTO debts (account, book_id, debtor_name, phone, group_name, quantity, price_per_unit, total_price, buy_price_per_unit, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+                        $insertDebt->execute([
+                            $account,
+                            $bookId,
+                            $debtorName,
+                            $debtorPhone !== '' ? $debtorPhone : null,
+                            $debtorGroup !== '' ? $debtorGroup : null,
+                            $debtQuantity,
+                            $pricePerUnit,
+                            $totalPrice,
+                            $buyUnit,
+                            $note !== '' ? $note : null,
+                        ]);
+
+                        $newQuantity = (int) $book['quantity'] - $debtQuantity;
+                        $updateBook = $pdo->prepare('UPDATE books SET quantity = ?, last_quantity_snapshot = ?, last_quantity_change = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND account = ?');
+                        $updateBook->execute([
+                            $newQuantity,
+                            (int) $book['quantity'],
+                            -$debtQuantity,
+                            $bookId,
+                            $account,
+                        ]);
+
+                        $pdo->commit();
+                        $messages[] = 'Kitob qarzga berildi.';
+                    } catch (Exception $e) {
+                        $pdo->rollBack();
+                        $errors[] = 'Qarzga berishda xatolik: ' . $e->getMessage();
+                    }
+                }
+            }
+        }
+
         if ($formType === 'edit_sale') {
             $saleId = (int) ($_POST['sale_id'] ?? 0);
             $newQuantity = (int) ($_POST['sale_quantity'] ?? 0);
@@ -263,6 +326,10 @@ $salesSummaryStmt = $pdo->prepare('SELECT COUNT(*) AS sales_count, SUM(quantity)
 $salesSummaryStmt->execute([$account]);
 $salesSummary = $salesSummaryStmt->fetch(PDO::FETCH_ASSOC) ?: ['sales_count' => 0, 'sold_quantity' => 0, 'revenue' => 0, 'profit' => 0];
 
+$debtSummaryStmt = $pdo->prepare('SELECT COUNT(*) AS debt_entries, SUM(quantity) AS debt_quantity, SUM(total_price) AS debt_value FROM debts WHERE account = ? AND paid_at IS NULL');
+$debtSummaryStmt->execute([$account]);
+$debtSummary = $debtSummaryStmt->fetch(PDO::FETCH_ASSOC) ?: ['debt_entries' => 0, 'debt_quantity' => 0, 'debt_value' => 0];
+
 $paymentStatsStmt = $pdo->prepare('SELECT payment_method, COUNT(*) AS sales_count, SUM(quantity) AS quantity, SUM(total_revenue) AS revenue FROM sales WHERE account = ? GROUP BY payment_method');
 $paymentStatsStmt->execute([$account]);
 $paymentStats = [
@@ -337,6 +404,9 @@ function formatCurrency(float $amount): string
                 <p class="text-sm text-slate-600">Kitoblarni boshqaring, sotuvlarni qayd eting va foydani kuzating.</p>
             </div>
             <div class="flex items-center gap-3">
+                <a href="debtors.php" class="inline-flex items-center gap-2 rounded-full border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100">
+                    <span>Qarzdorlar</span>
+                </a>
                 <a href="reports.php" class="inline-flex items-center gap-2 rounded-full border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100">
                     <span>Hisobotlar</span>
                 </a>
@@ -371,7 +441,7 @@ function formatCurrency(float $amount): string
         <section class="grid gap-4 md:grid-cols-2">
             <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                 <h2 class="text-lg font-semibold text-slate-900">Inventar koʼrsatkichlari</h2>
-                <dl class="mt-4 grid grid-cols-2 gap-3 text-sm">
+                <dl class="mt-4 grid grid-cols-2 gap-3 text-sm md:grid-cols-3 lg:grid-cols-6">
                     <div class="rounded-xl bg-slate-50 p-3">
                         <dt class="text-slate-500">Kitob turlari</dt>
                         <dd class="text-xl font-semibold text-slate-900"><?= (int) ($inventorySummary['total_books'] ?? 0) ?></dd>
@@ -387,6 +457,15 @@ function formatCurrency(float $amount): string
                     <div class="rounded-xl bg-slate-50 p-3">
                         <dt class="text-slate-500">Potensial tushum</dt>
                         <dd class="text-xl font-semibold text-emerald-600"><?= formatCurrency((float) ($inventorySummary['potential_revenue'] ?? 0)) ?> soʼm</dd>
+                    </div>
+                    <div class="rounded-xl bg-slate-50 p-3">
+                        <dt class="text-slate-500">Qarzga berilgan nusxalar</dt>
+                        <dd class="text-xl font-semibold text-slate-900"><?= (int) ($debtSummary['debt_quantity'] ?? 0) ?></dd>
+                        <p class="text-xs text-slate-500"><?= (int) ($debtSummary['debt_entries'] ?? 0) ?> ta qarzdor</p>
+                    </div>
+                    <div class="rounded-xl bg-slate-50 p-3">
+                        <dt class="text-slate-500">Qarz summasi</dt>
+                        <dd class="text-xl font-semibold text-amber-600"><?= formatCurrency((float) ($debtSummary['debt_value'] ?? 0)) ?> soʼm</dd>
                     </div>
                 </dl>
             </div>
@@ -484,6 +563,12 @@ function formatCurrency(float $amount): string
                                         data-book-quantity="<?= $quantity ?>"
                                         data-book-sell-price="<?= htmlspecialchars((float) ($book['sell_price'] ?? 0), ENT_QUOTES) ?>"
                                         class="inline-flex items-center rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-200">Sotish</button>
+                                    <button type="button" data-open-debt
+                                        data-book-id="<?= (int) $book['id'] ?>"
+                                        data-book-title="<?= htmlspecialchars($book['title'], ENT_QUOTES) ?>"
+                                        data-book-quantity="<?= $quantity ?>"
+                                        data-book-sell-price="<?= htmlspecialchars((float) ($book['sell_price'] ?? 0), ENT_QUOTES) ?>"
+                                        class="inline-flex items-center rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700 transition hover:bg-amber-200">Qarzga berish</button>
                                     <button type="button" data-open-book-edit
                                         data-book-id="<?= (int) $book['id'] ?>"
                                         data-book-title="<?= htmlspecialchars($book['title'], ENT_QUOTES) ?>"
@@ -711,6 +796,60 @@ function formatCurrency(float $amount): string
         </div>
     </div>
 
+    <div id="debt-modal" class="fixed inset-0 z-50 hidden items-center justify-center px-4">
+        <div class="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
+            <div class="flex items-start justify-between gap-3">
+                <div>
+                    <h2 class="text-lg font-semibold text-slate-900">Qarzga berish</h2>
+                    <p id="debt-modal-info" class="text-sm text-slate-600">Qarzdor maʼlumotlarini kiriting.</p>
+                </div>
+                <button type="button" data-close-modal class="text-slate-400 transition hover:text-slate-600">✕</button>
+            </div>
+            <form method="post" class="mt-4 space-y-4" id="debt-form">
+                <input type="hidden" name="form_type" value="create_debt">
+                <input type="hidden" name="book_id" value="">
+                <div class="grid gap-4 md:grid-cols-2">
+                    <div class="md:col-span-2">
+                        <label class="block text-sm font-medium text-slate-700">Qarzdor ismi</label>
+                        <input type="text" name="debtor_name" required class="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400" placeholder="Ism familiya">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700">Telefon</label>
+                        <input type="tel" name="debtor_phone" class="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400" placeholder="90 123 45 67">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700">Guruh/klassi</label>
+                        <input type="text" name="debtor_group" class="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400" placeholder="Masalan: 7-A">
+                    </div>
+                </div>
+                <div class="grid gap-4 md:grid-cols-2">
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700">Miqdor</label>
+                        <input type="number" name="debt_quantity" min="1" required class="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                        <p id="debt-quantity-helper" class="mt-1 text-xs text-slate-500"></p>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700">Kitob narxi</label>
+                        <input type="number" name="debt_price" min="0" step="0.01" required class="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400" placeholder="Masalan: 120000">
+                        <p class="mt-1 text-xs text-slate-500">Bitta kitob uchun sotuv narxi.</p>
+                    </div>
+                </div>
+                <div class="rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                    <span class="font-medium text-slate-900">Jami summa:</span>
+                    <span id="debt-total-amount">0</span> soʼm
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-700">Izoh (ixtiyoriy)</label>
+                    <textarea name="debt_note" rows="3" class="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400" placeholder="Masalan: 3 kun ichida qaytaradi"></textarea>
+                </div>
+                <div class="flex justify-end gap-2">
+                    <button type="button" data-close-modal class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100">Bekor qilish</button>
+                    <button type="submit" id="debt-submit" class="rounded-xl bg-amber-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-amber-600">Qarzga berish</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <div id="sale-modal" class="fixed inset-0 z-50 hidden items-center justify-center px-4">
         <div class="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
             <div class="flex items-start justify-between gap-3">
@@ -762,8 +901,9 @@ function formatCurrency(float $amount): string
         const backdrop = document.getElementById('modal-backdrop');
         const bookModal = document.getElementById('book-modal');
         const sellModal = document.getElementById('sell-modal');
+        const debtModal = document.getElementById('debt-modal');
         const saleModal = document.getElementById('sale-modal');
-        const modals = [bookModal, sellModal, saleModal];
+        const modals = [bookModal, sellModal, debtModal, saleModal];
 
         function openModal(modal) {
             if (!modal) return;
@@ -836,6 +976,83 @@ function formatCurrency(float $amount): string
                 bookModalTitle.textContent = 'Kitobni tahrirlash';
                 bookModalSubtitle.textContent = 'Kitob maʼlumotlarini yangilang.';
                 openModal(bookModal);
+            });
+        });
+
+        const debtForm = document.getElementById('debt-form');
+        const debtInfo = document.getElementById('debt-modal-info');
+        const debtHelper = document.getElementById('debt-quantity-helper');
+        const debtTotal = document.getElementById('debt-total-amount');
+        const debtSubmit = document.getElementById('debt-submit');
+        const debtPriceInput = debtForm ? debtForm.querySelector('input[name="debt_price"]') : null;
+        const debtQuantityInput = debtForm ? debtForm.querySelector('input[name="debt_quantity"]') : null;
+        const uzFormatter = new Intl.NumberFormat('uz-UZ');
+
+        function updateDebtTotal() {
+            if (!debtForm || !debtTotal) {
+                return;
+            }
+            const qty = debtQuantityInput ? parseInt(debtQuantityInput.value || '0', 10) : 0;
+            const price = debtPriceInput ? parseFloat(debtPriceInput.value || '0') : 0;
+            const total = qty > 0 && price > 0 ? qty * price : 0;
+            debtTotal.textContent = uzFormatter.format(Math.max(total, 0));
+        }
+
+        if (debtQuantityInput) {
+            debtQuantityInput.addEventListener('input', () => {
+                updateDebtTotal();
+            });
+        }
+
+        if (debtPriceInput) {
+            debtPriceInput.addEventListener('input', () => {
+                updateDebtTotal();
+            });
+        }
+
+        document.querySelectorAll('[data-open-debt]').forEach((button) => {
+            button.addEventListener('click', () => {
+                if (!debtForm) {
+                    return;
+                }
+                const id = button.getAttribute('data-book-id');
+                const title = button.getAttribute('data-book-title') || '';
+                const quantity = parseInt(button.getAttribute('data-book-quantity') || '0', 10);
+                const sellPrice = parseFloat(button.getAttribute('data-book-sell-price') || '0');
+
+                debtForm.reset();
+                debtForm.book_id.value = id || '';
+
+                if (debtQuantityInput) {
+                    debtQuantityInput.disabled = quantity <= 0;
+                    debtQuantityInput.max = Math.max(quantity, 0);
+                    debtQuantityInput.value = quantity > 0 ? 1 : '';
+                }
+
+                if (debtPriceInput) {
+                    debtPriceInput.disabled = quantity <= 0;
+                    debtPriceInput.value = Number.isFinite(sellPrice) && sellPrice > 0 ? sellPrice.toString() : '';
+                }
+
+                if (debtSubmit) {
+                    const disabled = quantity <= 0;
+                    debtSubmit.disabled = disabled;
+                    debtSubmit.classList.toggle('opacity-50', disabled);
+                    debtSubmit.classList.toggle('cursor-not-allowed', disabled);
+                }
+
+                if (debtHelper) {
+                    debtHelper.textContent = quantity > 0
+                        ? `Omborda: ${quantity} ta. Maksimal qarz miqdori ${quantity} ta.`
+                        : 'Omborda mavjud emas.';
+                }
+
+                if (debtInfo) {
+                    debtInfo.textContent = `${title} — omborda ${quantity} ta.`;
+                }
+
+                updateDebtTotal();
+                openModal(debtModal);
             });
         });
 

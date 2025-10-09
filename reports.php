@@ -118,7 +118,10 @@ function formatCurrency(float $amount): string
                 <h1 class="text-2xl font-bold text-slate-900"><?= htmlspecialchars($accountLabel) ?> — hisobotlar</h1>
                 <p class="text-sm text-slate-600">Oylik tendensiyalar, toʼlov usullari va eng koʼp sotilgan kitoblarni kuzating.</p>
             </div>
-            <a href="konto.php" class="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800">&larr; Inventarga qaytish</a>
+            <div class="flex items-center gap-3">
+                <a href="debtors.php" class="inline-flex items-center gap-2 rounded-full border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100">Qarzdorlar</a>
+                <a href="konto.php" class="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800">&larr; Inventarga qaytish</a>
+            </div>
         </div>
     </header>
 
