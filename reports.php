@@ -112,7 +112,7 @@ function formatCurrency(float $amount): string
 </head>
 <body class="bg-slate-100 text-slate-900">
     <header class="bg-white border-b border-slate-200">
-        <div class="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-4 py-4">
+        <div class="mx-auto flex w-full max-w-5xl flex-wrap items-center justify-between gap-4 px-4 py-4 sm:px-6">
             <div>
                 <p class="text-sm uppercase tracking-wider text-slate-500">Hisob</p>
                 <h1 class="text-2xl font-bold text-slate-900"><?= htmlspecialchars($accountLabel) ?> — hisobotlar</h1>
@@ -125,7 +125,7 @@ function formatCurrency(float $amount): string
         </div>
     </header>
 
-    <main class="mx-auto max-w-6xl space-y-6 px-4 py-6 sm:space-y-8">
+    <main class="mx-auto w-full max-w-5xl space-y-6 px-4 py-6 sm:px-6 sm:space-y-8">
         <?php if ($errors): ?>
             <div class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
                 <ul class="list-disc list-inside space-y-1">
@@ -137,13 +137,13 @@ function formatCurrency(float $amount): string
         <?php endif; ?>
 
         <section class="space-y-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-            <div class="flex flex-wrap items-center justify-between gap-3">
-                <div>
+            <div class="flex flex-wrap items-start justify-between gap-3">
+                <div class="space-y-1">
                     <h2 class="text-lg font-semibold text-slate-900">Sana oraligʼi boʼyicha tahlil</h2>
                     <p class="text-sm text-slate-600">Quyidagi davr: <span class="font-semibold text-slate-900"><?= htmlspecialchars($startDate->format('Y-m-d')) ?></span> &rarr; <span class="font-semibold text-slate-900"><?= htmlspecialchars($endDate->format('Y-m-d')) ?></span></p>
                 </div>
             </div>
-            <form method="get" class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-[repeat(2,minmax(0,1fr))_auto_auto]">
+            <form method="get" class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-[repeat(2,minmax(0,1fr))_auto_auto]">
                 <div>
                     <label class="block text-sm font-medium text-slate-600">Boshlanish sanasi</label>
                     <input type="date" name="start_date" value="<?= htmlspecialchars($startDate->format('Y-m-d')) ?>" class="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400">
@@ -160,7 +160,7 @@ function formatCurrency(float $amount): string
                 </div>
             </form>
 
-            <dl class="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+            <dl class="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2 xl:grid-cols-3">
                 <div class="rounded-xl bg-slate-50 p-4">
                     <dt class="text-slate-500">Sotuvlar soni</dt>
                     <dd class="mt-1 text-2xl font-semibold text-slate-900"><?= (int) ($rangeSummary['sales_count'] ?? 0) ?></dd>
@@ -200,7 +200,7 @@ function formatCurrency(float $amount): string
                     <div class="mt-4 aspect-square">
                         <canvas id="paymentChart" class="h-full w-full"></canvas>
                     </div>
-                    <ul class="mt-4 space-y-2 text-sm">
+                    <ul class="mt-4 space-y-2 text-sm sm:text-base">
                         <?php foreach ($paymentLabels as $key => $label): ?>
                             <li class="flex items-center justify-between">
                                 <span class="text-slate-600"><?= htmlspecialchars($label) ?></span>
@@ -213,15 +213,15 @@ function formatCurrency(float $amount): string
         </section>
 
         <section class="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-            <div class="flex flex-wrap items-center justify-between gap-3">
-                <div>
+            <div class="flex flex-wrap items-start justify-between gap-3">
+                <div class="space-y-1">
                     <h2 class="text-lg font-semibold text-slate-900">Tanlangan davr sotuvlari</h2>
                     <p class="text-sm text-slate-600">Har bir sotuv boʼyicha toʼlov usuli va izohlarni koʼring.</p>
                 </div>
-                <span class="rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-600">Jami: <?= count($rangeSales) ?> ta qayd</span>
+                <span class="rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-600 sm:text-base">Jami: <?= count($rangeSales) ?> ta qayd</span>
             </div>
             <div class="overflow-x-auto">
-                <table class="min-w-full divide-y divide-slate-200 text-sm">
+                <table class="min-w-full divide-y divide-slate-200 text-sm md:text-base">
                     <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                         <tr>
                             <th class="px-4 py-3 text-left">Sana</th>
@@ -269,13 +269,13 @@ function formatCurrency(float $amount): string
             </div>
         </section>
 
-        <section class="grid grid-cols-1 gap-4 lg:grid-cols-[2fr_3fr]">
+        <section class="grid grid-cols-1 gap-4 xl:grid-cols-[2fr_3fr]">
             <div class="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
                 <h2 class="text-lg font-semibold text-slate-900">Eng koʼp sotilgan kitoblar</h2>
                 <?php if (!$rangeTopBooks): ?>
                     <p class="text-sm text-slate-500">Tanlangan davrda yetarli maʼlumot yoʼq.</p>
                 <?php else: ?>
-                    <ul class="space-y-3 text-sm">
+                    <ul class="space-y-3 text-sm sm:text-base">
                         <?php foreach ($rangeTopBooks as $row): ?>
                             <li class="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-50 px-4 py-3">
                                 <div>
@@ -292,7 +292,7 @@ function formatCurrency(float $amount): string
             <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
                 <h2 class="text-lg font-semibold text-slate-900">Oylik hisobot</h2>
                 <div class="mt-4 overflow-x-auto">
-                    <table class="min-w-full divide-y divide-slate-200 text-sm">
+                    <table class="min-w-full divide-y divide-slate-200 text-sm md:text-base">
                         <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                             <tr>
                                 <th class="px-4 py-3 text-left">Oy</th>

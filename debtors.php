@@ -301,7 +301,7 @@ function formatCurrency(float $amount): string
 </head>
 <body class="bg-slate-100 text-slate-900">
     <header class="bg-white border-b border-slate-200">
-        <div class="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-4 py-4">
+        <div class="mx-auto flex w-full max-w-5xl flex-wrap items-center justify-between gap-4 px-4 py-4 sm:px-6">
             <div>
                 <p class="text-sm uppercase tracking-wider text-slate-500">Hisob</p>
                 <h1 class="text-2xl font-bold text-slate-900"><?= htmlspecialchars($accountLabel) ?> — qarzdorlar</h1>
@@ -315,7 +315,7 @@ function formatCurrency(float $amount): string
         </div>
     </header>
 
-    <main class="mx-auto max-w-6xl space-y-6 px-4 py-6 sm:space-y-8">
+    <main class="mx-auto w-full max-w-5xl space-y-6 px-4 py-6 sm:px-6 sm:space-y-8">
         <?php if ($errors): ?>
             <div class="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
                 <ul class="list-disc list-inside space-y-1">
@@ -337,45 +337,45 @@ function formatCurrency(float $amount): string
         <?php endif; ?>
 
         <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-            <div class="flex flex-wrap items-center justify-between gap-3">
-                <div>
+            <div class="flex flex-wrap items-start justify-between gap-3">
+                <div class="space-y-1">
                     <h2 class="text-lg font-semibold text-slate-900">Qarzdorlar statistikasi</h2>
                     <p class="text-sm text-slate-600">Qarzga berilgan kitoblar va toʼlov holati boʼyicha umumiy maʼlumot.</p>
                 </div>
             </div>
-            <dl class="mt-4 grid grid-cols-1 gap-4 text-sm sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
-                <div class="rounded-xl bg-slate-50 p-3">
+            <dl class="mt-4 grid grid-cols-1 gap-4 text-sm sm:grid-cols-2 xl:grid-cols-3">
+                <div class="rounded-xl bg-slate-50 p-4">
                     <dt class="text-slate-500">Faol qarzlar</dt>
-                    <dd class="text-xl font-semibold text-slate-900"><?= (int) ($debtSummary['debt_entries'] ?? 0) ?></dd>
+                    <dd class="text-2xl font-semibold text-slate-900"><?= (int) ($debtSummary['debt_entries'] ?? 0) ?></dd>
                 </div>
-                <div class="rounded-xl bg-slate-50 p-3">
+                <div class="rounded-xl bg-slate-50 p-4">
                     <dt class="text-slate-500">Qarzdorlar soni</dt>
-                    <dd class="text-xl font-semibold text-slate-900"><?= $uniqueDebtorCount ?></dd>
+                    <dd class="text-2xl font-semibold text-slate-900"><?= $uniqueDebtorCount ?></dd>
                 </div>
-                <div class="rounded-xl bg-slate-50 p-3">
+                <div class="rounded-xl bg-slate-50 p-4">
                     <dt class="text-slate-500">Qarzdagi nusxalar</dt>
-                    <dd class="text-xl font-semibold text-slate-900"><?= (int) ($debtSummary['debt_quantity'] ?? 0) ?></dd>
+                    <dd class="text-2xl font-semibold text-slate-900"><?= (int) ($debtSummary['debt_quantity'] ?? 0) ?></dd>
                 </div>
-                <div class="rounded-xl bg-slate-50 p-3">
+                <div class="rounded-xl bg-slate-50 p-4">
                     <dt class="text-slate-500">Qarz summasi</dt>
-                    <dd class="text-xl font-semibold text-amber-600"><?= formatCurrency((float) ($debtSummary['debt_value'] ?? 0)) ?> soʼm</dd>
+                    <dd class="text-2xl font-semibold text-amber-600"><?= formatCurrency((float) ($debtSummary['debt_value'] ?? 0)) ?> soʼm</dd>
                 </div>
-                <div class="rounded-xl bg-slate-50 p-3">
+                <div class="rounded-xl bg-slate-50 p-4">
                     <dt class="text-slate-500">3 kundan oshganlar</dt>
-                    <dd class="text-xl font-semibold text-rose-600"><?= $overdueCount ?></dd>
+                    <dd class="text-2xl font-semibold text-rose-600"><?= $overdueCount ?></dd>
                 </div>
             </dl>
         </section>
 
         <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-            <div class="flex flex-wrap items-center justify-between gap-3">
-                <div>
+            <div class="flex flex-wrap items-start justify-between gap-3">
+                <div class="space-y-1">
                     <h2 class="text-lg font-semibold text-slate-900">Faol qarzdorlar roʼyxati</h2>
                     <p class="text-sm text-slate-600">3 kundan oshgan qarzdorlar sariq rangda ajratiladi.</p>
                 </div>
             </div>
             <div class="mt-4 overflow-x-auto">
-                <table class="min-w-full divide-y divide-slate-200 text-sm">
+                <table class="min-w-full divide-y divide-slate-200 text-sm md:text-base">
                     <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                         <tr>
                             <th class="px-4 py-3 text-left">Qarzdor</th>

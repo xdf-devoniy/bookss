@@ -397,7 +397,7 @@ function formatCurrency(float $amount): string
 </head>
 <body class="bg-slate-100 text-slate-900">
     <header class="bg-white border-b border-slate-200">
-        <div class="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-4 py-4">
+        <div class="mx-auto flex w-full max-w-5xl flex-wrap items-center justify-between gap-4 px-4 py-4 sm:px-6">
             <div>
                 <p class="text-sm uppercase tracking-wider text-slate-500">Hisob</p>
                 <h1 class="text-2xl font-bold text-slate-900"><?= htmlspecialchars($accountLabel) ?> inventari</h1>
@@ -417,7 +417,7 @@ function formatCurrency(float $amount): string
         </div>
     </header>
 
-    <main class="mx-auto max-w-6xl space-y-6 px-4 py-6 sm:space-y-8">
+    <main class="mx-auto w-full max-w-5xl space-y-6 px-4 py-6 sm:px-6 sm:space-y-8">
         <?php if ($errors): ?>
             <div class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
                 <ul class="list-disc list-inside space-y-1">
@@ -438,73 +438,73 @@ function formatCurrency(float $amount): string
             </div>
         <?php endif; ?>
 
-        <section class="grid gap-4 md:grid-cols-2">
+        <section class="grid gap-4 lg:grid-cols-2">
             <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
                 <h2 class="text-lg font-semibold text-slate-900">Inventar koʼrsatkichlari</h2>
-                <dl class="mt-4 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-                    <div class="rounded-xl bg-slate-50 p-3">
+                <dl class="mt-4 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2 xl:grid-cols-3">
+                    <div class="rounded-xl bg-slate-50 p-4">
                         <dt class="text-slate-500">Kitob turlari</dt>
-                        <dd class="text-xl font-semibold text-slate-900"><?= (int) ($inventorySummary['total_books'] ?? 0) ?></dd>
+                        <dd class="text-2xl font-semibold text-slate-900"><?= (int) ($inventorySummary['total_books'] ?? 0) ?></dd>
                     </div>
-                    <div class="rounded-xl bg-slate-50 p-3">
+                    <div class="rounded-xl bg-slate-50 p-4">
                         <dt class="text-slate-500">Jami nusxalar</dt>
-                        <dd class="text-xl font-semibold text-slate-900"><?= (int) ($inventorySummary['total_quantity'] ?? 0) ?></dd>
+                        <dd class="text-2xl font-semibold text-slate-900"><?= (int) ($inventorySummary['total_quantity'] ?? 0) ?></dd>
                     </div>
-                    <div class="rounded-xl bg-slate-50 p-3">
+                    <div class="rounded-xl bg-slate-50 p-4">
                         <dt class="text-slate-500">Xarid qiymati</dt>
-                        <dd class="text-xl font-semibold text-slate-900"><?= formatCurrency((float) ($inventorySummary['total_cost_value'] ?? 0)) ?> soʼm</dd>
+                        <dd class="text-2xl font-semibold text-slate-900"><?= formatCurrency((float) ($inventorySummary['total_cost_value'] ?? 0)) ?> soʼm</dd>
                     </div>
-                    <div class="rounded-xl bg-slate-50 p-3">
+                    <div class="rounded-xl bg-slate-50 p-4">
                         <dt class="text-slate-500">Potensial tushum</dt>
-                        <dd class="text-xl font-semibold text-emerald-600"><?= formatCurrency((float) ($inventorySummary['potential_revenue'] ?? 0)) ?> soʼm</dd>
+                        <dd class="text-2xl font-semibold text-emerald-600"><?= formatCurrency((float) ($inventorySummary['potential_revenue'] ?? 0)) ?> soʼm</dd>
                     </div>
-                    <div class="rounded-xl bg-slate-50 p-3">
+                    <div class="rounded-xl bg-slate-50 p-4">
                         <dt class="text-slate-500">Qarzga berilgan nusxalar</dt>
-                        <dd class="text-xl font-semibold text-slate-900"><?= (int) ($debtSummary['debt_quantity'] ?? 0) ?></dd>
+                        <dd class="text-2xl font-semibold text-slate-900"><?= (int) ($debtSummary['debt_quantity'] ?? 0) ?></dd>
                         <p class="text-xs text-slate-500"><?= (int) ($debtSummary['debt_entries'] ?? 0) ?> ta qarzdor</p>
                     </div>
-                    <div class="rounded-xl bg-slate-50 p-3">
+                    <div class="rounded-xl bg-slate-50 p-4">
                         <dt class="text-slate-500">Qarz summasi</dt>
-                        <dd class="text-xl font-semibold text-amber-600"><?= formatCurrency((float) ($debtSummary['debt_value'] ?? 0)) ?> soʼm</dd>
+                        <dd class="text-2xl font-semibold text-amber-600"><?= formatCurrency((float) ($debtSummary['debt_value'] ?? 0)) ?> soʼm</dd>
                     </div>
                 </dl>
             </div>
             <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
                 <h2 class="text-lg font-semibold text-slate-900">Sotuv koʼrsatkichlari</h2>
                 <dl class="mt-4 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
-                    <div class="rounded-xl bg-slate-50 p-3">
+                    <div class="rounded-xl bg-slate-50 p-4">
                         <dt class="text-slate-500">Sotuvlar soni</dt>
-                        <dd class="text-xl font-semibold text-slate-900"><?= (int) ($salesSummary['sales_count'] ?? 0) ?></dd>
+                        <dd class="text-2xl font-semibold text-slate-900"><?= (int) ($salesSummary['sales_count'] ?? 0) ?></dd>
                     </div>
-                    <div class="rounded-xl bg-slate-50 p-3">
+                    <div class="rounded-xl bg-slate-50 p-4">
                         <dt class="text-slate-500">Sotilgan nusxalar</dt>
-                        <dd class="text-xl font-semibold text-slate-900"><?= (int) ($salesSummary['sold_quantity'] ?? 0) ?></dd>
+                        <dd class="text-2xl font-semibold text-slate-900"><?= (int) ($salesSummary['sold_quantity'] ?? 0) ?></dd>
                     </div>
-                    <div class="rounded-xl bg-slate-50 p-3">
+                    <div class="rounded-xl bg-slate-50 p-4">
                         <dt class="text-slate-500">Tushum</dt>
-                        <dd class="text-xl font-semibold text-slate-900"><?= formatCurrency((float) ($salesSummary['revenue'] ?? 0)) ?> soʼm</dd>
+                        <dd class="text-2xl font-semibold text-slate-900"><?= formatCurrency((float) ($salesSummary['revenue'] ?? 0)) ?> soʼm</dd>
                     </div>
-                    <div class="rounded-xl bg-slate-50 p-3">
+                    <div class="rounded-xl bg-slate-50 p-4">
                         <dt class="text-slate-500">Foyda</dt>
-                        <dd class="text-xl font-semibold text-emerald-600"><?= formatCurrency((float) ($salesSummary['profit'] ?? 0)) ?> soʼm</dd>
+                        <dd class="text-2xl font-semibold text-emerald-600"><?= formatCurrency((float) ($salesSummary['profit'] ?? 0)) ?> soʼm</dd>
                     </div>
                 </dl>
             </div>
         </section>
 
         <section class="space-y-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-            <div class="flex flex-wrap items-center justify-between gap-3">
-                <div>
+            <div class="flex flex-wrap items-start justify-between gap-3">
+                <div class="space-y-1">
                     <h2 class="text-lg font-semibold text-slate-900">Inventar roʼyxati</h2>
                     <p class="text-sm text-slate-600">Soʼnggi 10 kitob koʼrsatilgan. «Barchasini koʼrish» tugmasi orqali toʼliq roʼyxatni oching.</p>
                 </div>
-                <div class="flex flex-wrap justify-end gap-2 text-sm">
-                    <div class="rounded-full bg-emerald-50 px-3 py-1 text-emerald-600">Naqd: <?= (int) $paymentStats['cash']['quantity'] ?> ta</div>
-                    <div class="rounded-full bg-sky-50 px-3 py-1 text-sky-600">Click: <?= (int) $paymentStats['click']['quantity'] ?> ta</div>
+                <div class="flex flex-wrap justify-end gap-2 text-sm sm:text-base">
+                    <div class="rounded-full bg-emerald-50 px-3 py-1 font-medium text-emerald-600">Naqd: <?= (int) $paymentStats['cash']['quantity'] ?> ta</div>
+                    <div class="rounded-full bg-sky-50 px-3 py-1 font-medium text-sky-600">Click: <?= (int) $paymentStats['click']['quantity'] ?> ta</div>
                 </div>
             </div>
             <div class="overflow-x-auto">
-                <table class="min-w-full divide-y divide-slate-200 text-sm">
+                <table class="min-w-full divide-y divide-slate-200 text-sm md:text-base">
                     <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                         <tr>
                             <th class="px-4 py-3 text-left">Kitob nomi</th>
@@ -597,18 +597,18 @@ function formatCurrency(float $amount): string
         </section>
 
         <section class="space-y-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-            <div class="flex flex-wrap items-center justify-between gap-3">
-                <div>
+            <div class="flex flex-wrap items-start justify-between gap-3">
+                <div class="space-y-1">
                     <h2 class="text-lg font-semibold text-slate-900">Sotilgan kitoblar jurnali</h2>
                     <p class="text-sm text-slate-600">Soʼnggi 10 sotuv koʼrsatiladi. Sana oraligʼini tanlab, kerakli davrni koʼring.</p>
                 </div>
-                <div class="flex flex-wrap items-center gap-2 text-sm">
-                    <div class="rounded-full bg-emerald-50 px-3 py-1 text-emerald-600">Naqd tushum: <?= formatCurrency((float) $paymentStats['cash']['revenue']) ?> soʼm</div>
-                    <div class="rounded-full bg-sky-50 px-3 py-1 text-sky-600">Click tushum: <?= formatCurrency((float) $paymentStats['click']['revenue']) ?> soʼm</div>
+                <div class="flex flex-wrap items-center gap-2 text-sm sm:text-base">
+                    <div class="rounded-full bg-emerald-50 px-3 py-1 font-medium text-emerald-600">Naqd tushum: <?= formatCurrency((float) $paymentStats['cash']['revenue']) ?> soʼm</div>
+                    <div class="rounded-full bg-sky-50 px-3 py-1 font-medium text-sky-600">Click tushum: <?= formatCurrency((float) $paymentStats['click']['revenue']) ?> soʼm</div>
                 </div>
             </div>
 
-            <form method="get" class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-[repeat(2,minmax(0,1fr))_auto_auto]">
+            <form method="get" class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-[repeat(2,minmax(0,1fr))_auto]">
                 <div>
                     <label class="block text-sm font-medium text-slate-600">Boshlanish sanasi</label>
                     <input type="date" name="sale_from" value="<?= htmlspecialchars($saleFrom ? $saleFrom->format('Y-m-d') : '') ?>" class="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400">
@@ -626,7 +626,7 @@ function formatCurrency(float $amount): string
             </form>
 
             <div class="overflow-x-auto">
-                <table class="min-w-full divide-y divide-slate-200 text-sm">
+                <table class="min-w-full divide-y divide-slate-200 text-sm md:text-base">
                     <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                         <tr>
                             <th class="px-4 py-3 text-left">Sana</th>
@@ -697,7 +697,7 @@ function formatCurrency(float $amount): string
             </div>
 
             <?php if ($topSold): ?>
-                <div class="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
+                <div class="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2 xl:grid-cols-3">
                     <?php foreach ($topSold as $row): ?>
                         <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
                             <div class="truncate font-semibold text-slate-900" title="<?= htmlspecialchars($row['title'] ?? 'Kitob') ?>"><?= htmlspecialchars($row['title'] ?? 'Kitob') ?></div>
@@ -710,7 +710,7 @@ function formatCurrency(float $amount): string
         </section>
     </main>
 
-    <button type="button" data-open-book-create class="fixed bottom-24 right-4 inline-flex items-center gap-2 rounded-full bg-emerald-500 px-5 py-3 text-sm font-semibold text-white shadow-lg transition hover:bg-emerald-600 focus:outline-none focus:ring-4 focus:ring-emerald-300 sm:bottom-12 sm:right-6 md:bottom-8 md:right-8">
+    <button type="button" data-open-book-create class="fixed bottom-16 right-4 inline-flex items-center gap-2 rounded-full bg-emerald-500 px-5 py-3 text-sm font-semibold text-white shadow-lg transition hover:bg-emerald-600 focus:outline-none focus:ring-4 focus:ring-emerald-300 sm:bottom-12 sm:right-6 md:bottom-10 md:right-10">
         <span class="text-lg">＋</span>
         <span>Kitob qoʼshish</span>
     </button>
