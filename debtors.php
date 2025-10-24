@@ -285,6 +285,42 @@ foreach ($debts as $row) {
 }
 $uniqueDebtorCount = count($uniqueDebtors);
 
+$debtsByBook = [];
+foreach ($debts as $debt) {
+    $bookId = isset($debt['book_id']) ? (int) $debt['book_id'] : 0;
+    $title = trim((string) ($debt['title'] ?? ''));
+    if ($title === '') {
+        $title = 'Aniqlanmagan kitob';
+        if ($bookId === 0) {
+            $title .= ' (inventardan oʼchirib tashlangan boʼlishi mumkin)';
+        }
+    }
+
+    $groupKey = $bookId > 0 ? 'book_' . $bookId : 'bookless_' . md5($title);
+
+    if (!isset($debtsByBook[$groupKey])) {
+        $debtsByBook[$groupKey] = [
+            'book_id' => $bookId,
+            'title' => $title,
+            'items' => [],
+            'entry_count' => 0,
+            'total_quantity' => 0,
+            'total_value' => 0.0,
+            'current_quantity' => isset($debt['current_quantity']) ? (int) $debt['current_quantity'] : null,
+        ];
+    }
+
+    $debtsByBook[$groupKey]['items'][] = $debt;
+    $debtsByBook[$groupKey]['entry_count']++;
+    $debtsByBook[$groupKey]['total_quantity'] += (int) ($debt['quantity'] ?? 0);
+    $debtsByBook[$groupKey]['total_value'] += (float) ($debt['total_price'] ?? 0);
+    if (isset($debt['current_quantity'])) {
+        $debtsByBook[$groupKey]['current_quantity'] = (int) $debt['current_quantity'];
+    }
+}
+
+$debtBookCount = count($debtsByBook);
+
 function formatCurrency(float $amount): string
 {
     return number_format($amount, 2, '.', ' ');
@@ -349,6 +385,10 @@ function formatCurrency(float $amount): string
                     <dd class="text-2xl font-semibold text-slate-900"><?= (int) ($debtSummary['debt_entries'] ?? 0) ?></dd>
                 </div>
                 <div class="rounded-xl bg-slate-50 p-4">
+                    <dt class="text-slate-500">Kitob turlari</dt>
+                    <dd class="text-2xl font-semibold text-slate-900"><?= $debtBookCount ?></dd>
+                </div>
+                <div class="rounded-xl bg-slate-50 p-4">
                     <dt class="text-slate-500">Qarzdorlar soni</dt>
                     <dd class="text-2xl font-semibold text-slate-900"><?= $uniqueDebtorCount ?></dd>
                 </div>
@@ -371,7 +411,7 @@ function formatCurrency(float $amount): string
             <div class="flex flex-wrap items-start justify-between gap-3">
                 <div class="space-y-1">
                     <h2 class="text-lg font-semibold text-slate-900">Faol qarzdorlar roʼyxati</h2>
-                    <p class="text-sm text-slate-600">3 kundan oshgan qarzdorlar sariq rangda ajratiladi.</p>
+                    <p class="text-sm text-slate-600">Qarzlar kitob nomi boʼyicha guruhlangan, 3 kundan oshgan qarzdorlar sariq rangda ajratiladi.</p>
                 </div>
             </div>
             <div class="mt-4 overflow-x-auto">
@@ -387,109 +427,132 @@ function formatCurrency(float $amount): string
                             <th class="px-4 py-3 text-right">Amallar</th>
                         </tr>
                     </thead>
-                    <tbody class="divide-y divide-slate-100">
-                        <?php if (!$debts): ?>
+                    <?php if (!$debts): ?>
+                        <tbody>
                             <tr>
                                 <td colspan="7" class="px-4 py-6 text-center text-slate-500">Faol qarzdorlar mavjud emas.</td>
                             </tr>
-                        <?php endif; ?>
-                        <?php foreach ($debts as $debt): ?>
-                            <?php
-                                $createdAt = null;
-                                $overdue = false;
-                                $daysAgoText = '';
-                                if (!empty($debt['created_at'])) {
-                                    try {
-                                        $createdAt = new DateTime($debt['created_at']);
-                                        $diff = $createdAt->diff(new DateTime('now'));
-                                        $daysAgo = (int) $diff->format('%a');
-                                        $daysAgoText = $daysAgo === 0 ? 'Bugun' : ($daysAgo . ' kun oldin');
-                                        $overdue = $createdAt <= $overdueLimit;
-                                    } catch (Exception $e) {
+                        </tbody>
+                    <?php else: ?>
+                        <?php foreach ($debtsByBook as $group): ?>
+                            <tbody class="divide-y divide-slate-100">
+                                <tr class="bg-slate-100/70">
+                                    <td colspan="7" class="px-4 py-3">
+                                        <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                                            <div>
+                                                <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Kitob</p>
+                                                <p class="text-base font-semibold text-slate-900"><?= htmlspecialchars($group['title']) ?></p>
+                                            </div>
+                                            <div class="flex flex-wrap gap-3 text-xs text-slate-600 sm:text-sm">
+                                                <span><span class="font-semibold text-slate-900"><?= $group['entry_count'] ?></span> ta qarz</span>
+                                                <span><span class="font-semibold text-slate-900"><?= $group['total_quantity'] ?></span> ta nusxa</span>
+                                                <span><span class="font-semibold text-slate-900"><?= formatCurrency($group['total_value']) ?></span> soʼm</span>
+                                                <?php if ($group['current_quantity'] !== null): ?>
+                                                    <span>Omborda: <span class="font-semibold text-slate-900"><?= (int) $group['current_quantity'] ?></span> ta</span>
+                                                <?php endif; ?>
+                                            </div>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <?php foreach ($group['items'] as $debt): ?>
+                                    <?php
+                                        $createdAt = null;
+                                        $overdue = false;
                                         $daysAgoText = '';
-                                    }
-                                }
-                                $rowClasses = 'transition hover:bg-slate-50';
-                                if ($overdue) {
-                                    $rowClasses .= ' border-l-4 border-amber-400 bg-amber-50/70 hover:bg-amber-50';
-                                }
-                                $totalPrice = (float) ($debt['total_price'] ?? 0);
-                                $pricePerUnit = (float) ($debt['price_per_unit'] ?? 0);
-                                $quantity = (int) ($debt['quantity'] ?? 0);
-                                $stock = (int) ($debt['current_quantity'] ?? 0);
-                            ?>
-                            <tr class="<?= $rowClasses ?>">
-                                <td class="px-4 py-3 align-top text-slate-700">
-                                    <div class="font-semibold text-slate-900"><?= htmlspecialchars($debt['debtor_name'] ?? 'Nomaʼlum') ?></div>
-                                    <?php if (!empty($debt['group_name'])): ?>
-                                        <div class="text-xs text-slate-500">Guruh: <?= htmlspecialchars($debt['group_name']) ?></div>
-                                    <?php endif; ?>
-                                    <?php if (!empty($debt['phone'])): ?>
-                                        <div class="text-xs text-slate-500">Tel: <?= htmlspecialchars($debt['phone']) ?></div>
-                                    <?php endif; ?>
-                                </td>
-                                <td class="px-4 py-3 align-top">
-                                    <div class="font-medium text-slate-900"><?= htmlspecialchars($debt['title'] ?? 'Kitob topilmadi') ?></div>
-                                    <?php if (!empty($debt['note'])): ?>
-                                        <div class="text-xs text-slate-500">Izoh: <?= htmlspecialchars($debt['note']) ?></div>
-                                    <?php endif; ?>
-                                </td>
-                                <td class="px-4 py-3 align-top text-slate-700">
-                                    <div class="font-semibold text-slate-900"><?= $quantity ?> ta</div>
-                                    <div class="text-xs text-slate-500">Ombor: <?= $stock ?> ta</div>
-                                </td>
-                                <td class="px-4 py-3 align-top text-slate-700">
-                                    <div class="font-semibold text-slate-900"><?= formatCurrency($totalPrice) ?> soʼm</div>
-                                    <div class="text-xs text-slate-500"><?= formatCurrency($pricePerUnit) ?> soʼm / ta</div>
-                                </td>
-                                <td class="px-4 py-3 align-top text-slate-700">
-                                    <?php if ($createdAt): ?>
-                                        <div class="font-medium text-slate-900"><?= htmlspecialchars($createdAt->format('Y-m-d')) ?></div>
-                                        <?php if ($daysAgoText !== ''): ?>
-                                            <div class="text-xs text-slate-500"><?= htmlspecialchars($daysAgoText) ?></div>
-                                        <?php endif; ?>
-                                    <?php else: ?>
-                                        <div class="text-xs text-slate-500">Sana mavjud emas</div>
-                                    <?php endif; ?>
-                                </td>
-                                <td class="px-4 py-3 align-top">
-                                    <?php if ($overdue): ?>
-                                        <span class="inline-flex items-center rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700">3 kundan oshgan</span>
-                                    <?php else: ?>
-                                        <span class="inline-flex items-center rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">Faol</span>
-                                    <?php endif; ?>
-                                </td>
-                                <td class="px-4 py-3 align-top text-right">
-                                    <div class="flex flex-wrap justify-end gap-2">
-                                        <button type="button" data-open-debt-edit
-                                            data-debt-id="<?= (int) $debt['id'] ?>"
-                                            data-debt-name="<?= htmlspecialchars($debt['debtor_name'] ?? '', ENT_QUOTES) ?>"
-                                            data-debt-phone="<?= htmlspecialchars($debt['phone'] ?? '', ENT_QUOTES) ?>"
-                                            data-debt-group="<?= htmlspecialchars($debt['group_name'] ?? '', ENT_QUOTES) ?>"
-                                            data-debt-quantity="<?= $quantity ?>"
-                                            data-debt-price="<?= $pricePerUnit ?>"
-                                            data-debt-note="<?= htmlspecialchars($debt['note'] ?? '', ENT_QUOTES) ?>"
-                                            data-debt-title="<?= htmlspecialchars($debt['title'] ?? '', ENT_QUOTES) ?>"
-                                            data-debt-stock="<?= $stock ?>"
-                                            class="inline-flex items-center rounded-full bg-sky-100 px-3 py-1 text-xs font-semibold text-sky-700 transition hover:bg-sky-200">Tahrirlash</button>
-                                        <button type="button" data-open-debt-pay
-                                            data-debt-id="<?= (int) $debt['id'] ?>"
-                                            data-debt-name="<?= htmlspecialchars($debt['debtor_name'] ?? '', ENT_QUOTES) ?>"
-                                            data-debt-title="<?= htmlspecialchars($debt['title'] ?? '', ENT_QUOTES) ?>"
-                                            data-debt-quantity="<?= $quantity ?>"
-                                            data-debt-total="<?= $totalPrice ?>"
-                                            data-debt-price="<?= $pricePerUnit ?>"
-                                            class="inline-flex items-center rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-200">Toʼlov</button>
-                                        <form method="post" class="inline" onsubmit="return confirm('Qarz yozuvini oʼchirilsinmi?');">
-                                            <input type="hidden" name="form_type" value="delete_debt">
-                                            <input type="hidden" name="debt_id" value="<?= (int) $debt['id'] ?>">
-                                            <button type="submit" class="inline-flex items-center rounded-full bg-rose-100 px-3 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-200">Oʼchirish</button>
-                                        </form>
-                                    </div>
-                                </td>
-                            </tr>
+                                        if (!empty($debt['created_at'])) {
+                                            try {
+                                                $createdAt = new DateTime($debt['created_at']);
+                                                $diff = $createdAt->diff(new DateTime('now'));
+                                                $daysAgo = (int) $diff->format('%a');
+                                                $daysAgoText = $daysAgo === 0 ? 'Bugun' : ($daysAgo . ' kun oldin');
+                                                $overdue = $createdAt <= $overdueLimit;
+                                            } catch (Exception $e) {
+                                                $daysAgoText = '';
+                                            }
+                                        }
+                                        $rowClasses = 'transition hover:bg-slate-50';
+                                        if ($overdue) {
+                                            $rowClasses .= ' border-l-4 border-amber-400 bg-amber-50/70 hover:bg-amber-50';
+                                        }
+                                        $totalPrice = (float) ($debt['total_price'] ?? 0);
+                                        $pricePerUnit = (float) ($debt['price_per_unit'] ?? 0);
+                                        $quantity = (int) ($debt['quantity'] ?? 0);
+                                        $stock = (int) ($debt['current_quantity'] ?? 0);
+                                    ?>
+                                    <tr class="<?= $rowClasses ?>">
+                                        <td class="px-4 py-3 align-top text-slate-700">
+                                            <div class="font-semibold text-slate-900"><?= htmlspecialchars($debt['debtor_name'] ?? 'Nomaʼlum') ?></div>
+                                            <?php if (!empty($debt['group_name'])): ?>
+                                                <div class="text-xs text-slate-500">Guruh: <?= htmlspecialchars($debt['group_name']) ?></div>
+                                            <?php endif; ?>
+                                            <?php if (!empty($debt['phone'])): ?>
+                                                <div class="text-xs text-slate-500">Tel: <?= htmlspecialchars($debt['phone']) ?></div>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td class="px-4 py-3 align-top">
+                                            <div class="font-medium text-slate-900"><?= htmlspecialchars($debt['title'] ?? 'Kitob topilmadi') ?></div>
+                                            <?php if (!empty($debt['note'])): ?>
+                                                <div class="text-xs text-slate-500">Izoh: <?= htmlspecialchars($debt['note']) ?></div>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td class="px-4 py-3 align-top text-slate-700">
+                                            <div class="font-semibold text-slate-900"><?= $quantity ?> ta</div>
+                                            <div class="text-xs text-slate-500">Ombor: <?= $stock ?> ta</div>
+                                        </td>
+                                        <td class="px-4 py-3 align-top text-slate-700">
+                                            <div class="font-semibold text-slate-900"><?= formatCurrency($totalPrice) ?> soʼm</div>
+                                            <div class="text-xs text-slate-500"><?= formatCurrency($pricePerUnit) ?> soʼm / ta</div>
+                                        </td>
+                                        <td class="px-4 py-3 align-top text-slate-700">
+                                            <?php if ($createdAt): ?>
+                                                <div class="font-medium text-slate-900"><?= htmlspecialchars($createdAt->format('Y-m-d')) ?></div>
+                                                <?php if ($daysAgoText !== ''): ?>
+                                                    <div class="text-xs text-slate-500"><?= htmlspecialchars($daysAgoText) ?></div>
+                                                <?php endif; ?>
+                                            <?php else: ?>
+                                                <div class="text-xs text-slate-500">Sana mavjud emas</div>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td class="px-4 py-3 align-top">
+                                            <?php if ($overdue): ?>
+                                                <span class="inline-flex items-center rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700">3 kundan oshgan</span>
+                                            <?php else: ?>
+                                                <span class="inline-flex items-center rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">Faol</span>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td class="px-4 py-3 align-top text-right">
+                                            <div class="flex flex-wrap justify-end gap-2">
+                                                <button type="button" data-open-debt-edit
+                                                    data-debt-id="<?= (int) $debt['id'] ?>"
+                                                    data-debt-name="<?= htmlspecialchars($debt['debtor_name'] ?? '', ENT_QUOTES) ?>"
+                                                    data-debt-phone="<?= htmlspecialchars($debt['phone'] ?? '', ENT_QUOTES) ?>"
+                                                    data-debt-group="<?= htmlspecialchars($debt['group_name'] ?? '', ENT_QUOTES) ?>"
+                                                    data-debt-quantity="<?= $quantity ?>"
+                                                    data-debt-price="<?= $pricePerUnit ?>"
+                                                    data-debt-note="<?= htmlspecialchars($debt['note'] ?? '', ENT_QUOTES) ?>"
+                                                    data-debt-title="<?= htmlspecialchars($debt['title'] ?? '', ENT_QUOTES) ?>"
+                                                    data-debt-stock="<?= $stock ?>"
+                                                    class="inline-flex items-center rounded-full bg-sky-100 px-3 py-1 text-xs font-semibold text-sky-700 transition hover:bg-sky-200">Tahrirlash</button>
+                                                <button type="button" data-open-debt-pay
+                                                    data-debt-id="<?= (int) $debt['id'] ?>"
+                                                    data-debt-name="<?= htmlspecialchars($debt['debtor_name'] ?? '', ENT_QUOTES) ?>"
+                                                    data-debt-title="<?= htmlspecialchars($debt['title'] ?? '', ENT_QUOTES) ?>"
+                                                    data-debt-quantity="<?= $quantity ?>"
+                                                    data-debt-total="<?= $totalPrice ?>"
+                                                    data-debt-price="<?= $pricePerUnit ?>"
+                                                    class="inline-flex items-center rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-200">Toʼlov</button>
+                                                <form method="post" class="inline" onsubmit="return confirm('Qarz yozuvini oʼchirilsinmi?');">
+                                                    <input type="hidden" name="form_type" value="delete_debt">
+                                                    <input type="hidden" name="debt_id" value="<?= (int) $debt['id'] ?>">
+                                                    <button type="submit" class="inline-flex items-center rounded-full bg-rose-100 px-3 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-200">Oʼchirish</button>
+                                                </form>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
                         <?php endforeach; ?>
-                    </tbody>
+                    <?php endif; ?>
                 </table>
             </div>
         </section>
